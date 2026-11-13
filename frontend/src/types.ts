@@ -173,7 +173,7 @@ export interface InferenceConfig {
   mps_attention_slicing: boolean;
   comfyui_base_url: string;
   comfyui_checkpoint: string;
-  comfyui_render_mode?: 'hybrid_refiner' | 'single_stylized' | 'single_raw';
+  comfyui_render_mode?: 'hybrid_refiner' | 'single_stylized' | 'single_raw' | 'action_hybrid';
   comfyui_refiner_checkpoint?: string;
   comfyui_refiner_switch?: number;
   comfyui_face_detailer_enabled?: boolean;

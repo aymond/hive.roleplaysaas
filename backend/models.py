@@ -195,7 +195,8 @@ class InferenceConfig(BaseModel):
         "hybrid_refiner",
         "single_stylized",
         "single_raw",
-    ] = "single_stylized"
+        "action_hybrid",
+    ] = "action_hybrid"
     comfyui_refiner_checkpoint: str = "sd_xl_base_1.0_0.9vae.safetensors"
     comfyui_refiner_switch: float = 0.65
     comfyui_face_detailer_enabled: bool = True

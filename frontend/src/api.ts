@@ -203,7 +203,7 @@ export const api = {
     include_scenario_backstory?: boolean;
     include_world_lore?: boolean;
     use_llm_director?: boolean;
-    render_mode?: 'hybrid_refiner' | 'single_stylized' | 'single_raw';
+    render_mode?: 'hybrid_refiner' | 'single_stylized' | 'single_raw' | 'action_hybrid';
     face_detailer?: boolean;
     width?: number;
     height?: number;

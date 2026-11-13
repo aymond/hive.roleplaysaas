@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from ..logger import logger
 from ..models import InferenceConfig
-from .llm_engine import build_anatomical_and_clothing_overrides, build_face_detailer_prompt
+from .llm_engine import build_anatomical_and_clothing_overrides, build_face_detailer_prompt, is_dynamic_action_scene
 
 try:
     import torch
@@ -500,7 +500,22 @@ async def _run_comfyui_bridge(
         if sampler_name == "dpmpp_2m_sde":
             sampler_name = "dpmpp_2m"
 
-    # Determine if we can run the 2-stage Hybrid Refiner (Pony/Base -> Artistic SDXL Refiner)
+    # Determine if we can run a 2-stage hybrid pipeline:
+    # - 'action_hybrid': Juggernaut-XL (dynamic action/physics base) -> Primary Pony checkpoint (attire/skin/anatomy refine)
+    # - 'hybrid_refiner': Primary Pony checkpoint -> Artistic SDXL Refiner
+    action_base_ckpt = next(
+        (c for c in (available_ckpts or []) if "juggernaut" in c.lower()),
+        None,
+    ) or next(
+        (c for c in (available_ckpts or []) if "dreamshaper" in c.lower()),
+        None,
+    )
+    use_action_hybrid = (
+        (active_mode == "action_hybrid" or (is_dynamic_action_scene(prompt) and active_mode != "single_raw"))
+        and bool(action_base_ckpt)
+        and action_base_ckpt != ckpt_to_use
+    )
+
     refiner_ckpt = getattr(config, "comfyui_refiner_checkpoint", "sd_xl_base_1.0_0.9vae.safetensors")
     if available_ckpts and refiner_ckpt not in available_ckpts:
         refiner_match = next(
@@ -510,14 +525,18 @@ async def _run_comfyui_bridge(
         if refiner_match:
             refiner_ckpt = refiner_match
 
-    use_hybrid = (
+    use_hybrid = use_action_hybrid or (
         active_mode == "hybrid_refiner"
         and bool(refiner_ckpt)
         and refiner_ckpt != ckpt_to_use
         and (not available_ckpts or refiner_ckpt in available_ckpts)
     )
 
-    is_pony_primary = "pony" in ckpt_to_use.lower()
+    stage1_ckpt = action_base_ckpt if use_action_hybrid else ckpt_to_use
+    stage2_ckpt = ckpt_to_use if use_action_hybrid else refiner_ckpt
+    is_pony_primary = "pony" in stage1_ckpt.lower()
+    is_pony_stage2 = "pony" in stage2_ckpt.lower()
+
     base_neg = (
         negative_prompt
         or "score_4, score_5, score_6, blurry, low quality, flat lighting, washed out, oversaturated, burnt face, red nose, clown makeup, deformed, bad anatomy"
@@ -526,29 +545,30 @@ async def _run_comfyui_bridge(
     neg_text = f"{base_neg}, {neg_clothing_blockers}" if neg_clothing_blockers else base_neg
     if not any(m in prompt.lower() for m in ("2girls", "3girls", "two women", "multiple girls", "crowd", "group", "threesome")):
         neg_text = f"{neg_text}, 2girls, multiple girls, two women, duplicate, twins"
-    if is_pony_primary and "score_4" not in neg_text:
+    if (is_pony_primary or is_pony_stage2) and "score_4" not in neg_text:
         neg_text = f"score_4, score_5, score_6, {neg_text}"
 
     if use_hybrid:
-        # Stage 1 (Uncensored Pose & Anatomy on Primary Model, e.g. CyberRealisticPony) ->
-        # Stage 2 (Golden-Hour Painterly Aesthetic & Celebrity Facial Polish on Refiner Model, e.g. sd_xl_base_1.0)
-        # Use img2img latent handoff (VAEDecode -> VAEEncode -> KSampler denoise=0.38) instead of KSamplerAdvanced
-        # because Pony and SDXL Base have incompatible latent noise scales mid-schedule (which causes red/cyan face burn).
-        stage1_steps = max(12, int(round(steps * 0.8)))
-        refiner_prompt = (
+        stage1_steps = max(14, int(round(steps * 0.8)))
+        clean_non_pony_prompt = (
             prompt.replace("score_9, score_8_up, score_7_up,", "")
             .replace("score_9, score_8_up, score_7_up", "")
-            .strip()
+            .strip(" ,")
         )
-        refiner_prompt = (
-            f"masterpiece stylized glamour digital art, natural beautiful face, warm golden hour sunset rim lighting, "
-            f"luminous bronze and amber color grading, {refiner_prompt}"
-        )
+        if use_action_hybrid:
+            stage1_prompt = clean_non_pony_prompt
+            stage2_prompt = prompt
+        else:
+            stage1_prompt = prompt
+            stage2_prompt = (
+                f"masterpiece stylized glamour digital art, natural beautiful face, warm golden hour sunset rim lighting, "
+                f"luminous bronze and amber color grading, {clean_non_pony_prompt}"
+            )
 
         workflow_payload: dict[str, Any] = {
             "4": {
                 "class_type": "CheckpointLoaderSimple",
-                "inputs": {"ckpt_name": ckpt_to_use},
+                "inputs": {"ckpt_name": stage1_ckpt},
             },
             "10": {
                 "class_type": "CLIPSetLastLayer",
@@ -560,7 +580,7 @@ async def _run_comfyui_bridge(
             },
             "6": {
                 "class_type": "CLIPTextEncode",
-                "inputs": {"clip": ["10", 0], "text": prompt},
+                "inputs": {"clip": ["10", 0], "text": stage1_prompt},
             },
             "7": {
                 "class_type": "CLIPTextEncode",
@@ -587,7 +607,11 @@ async def _run_comfyui_bridge(
             },
             "11": {
                 "class_type": "CheckpointLoaderSimple",
-                "inputs": {"ckpt_name": refiner_ckpt},
+                "inputs": {"ckpt_name": stage2_ckpt},
+            },
+            "17": {
+                "class_type": "CLIPSetLastLayer",
+                "inputs": {"clip": ["11", 1], "stop_at_clip_layer": -2 if is_pony_stage2 else -1},
             },
             "16": {
                 "class_type": "VAEEncode",
@@ -595,13 +619,13 @@ async def _run_comfyui_bridge(
             },
             "12": {
                 "class_type": "CLIPTextEncode",
-                "inputs": {"clip": ["11", 1], "text": refiner_prompt},
+                "inputs": {"clip": ["17", 0], "text": stage2_prompt},
             },
             "13": {
                 "class_type": "CLIPTextEncode",
                 "inputs": {
-                    "clip": ["11", 1],
-                    "text": "oversaturated, red face, glowing nose, clown makeup, blurry, low quality, deformed",
+                    "clip": ["17", 0],
+                    "text": neg_text if use_action_hybrid else "oversaturated, red face, glowing nose, clown makeup, blurry, low quality, deformed",
                 },
             },
             "14": {
@@ -609,13 +633,13 @@ async def _run_comfyui_bridge(
                 "inputs": {
                     "seed": seed + 1,
                     "steps": 14,
-                    "cfg": 5.0,
+                    "cfg": 5.5 if use_action_hybrid else 5.0,
                     "sampler_name": "dpmpp_2m",
                     "scheduler": "karras",
                     "positive": ["12", 0],
                     "negative": ["13", 0],
                     "latent_image": ["16", 0],
-                    "denoise": 0.36,
+                    "denoise": 0.42 if use_action_hybrid else 0.36,
                     "model": ["11", 0],
                 },
             },
@@ -628,7 +652,11 @@ async def _run_comfyui_bridge(
                 "inputs": {"filename_prefix": "Hivemind_Hybrid", "images": ["8", 0]},
             },
         }
-        provider_label = f"comfyui_hybrid ({ckpt_to_use} → {refiner_ckpt})"
+        provider_label = (
+            f"comfyui_action_hybrid ({stage1_ckpt} → {stage2_ckpt})"
+            if use_action_hybrid
+            else f"comfyui_hybrid ({stage1_ckpt} → {stage2_ckpt})"
+        )
     else:
         workflow_payload = {
             "4": {
@@ -778,9 +806,9 @@ async def _run_comfyui_bridge(
         "🎨 COMFY→   | POST /prompt | mode=%s | ckpt=%s%s | face_detailer=%s | %dx%d | steps=%d | cfg=%.1f | sampler=%s/%s | seed=%d\n"
         "                    ├─ Positive: %s\n"
         "                    └─ Negative: %s",
-        "hybrid_refiner" if use_hybrid else active_mode,
-        ckpt_to_use,
-        f" → {refiner_ckpt}" if use_hybrid else "",
+        "action_hybrid" if use_action_hybrid else ("hybrid_refiner" if use_hybrid else active_mode),
+        stage1_ckpt if use_hybrid else ckpt_to_use,
+        f" → {stage2_ckpt}" if use_hybrid else "",
         "ON (in-graph)" if face_detector_model else "OFF",
         width,
         height,

@@ -365,6 +365,20 @@ async def generate_node_text(
     return expanded, "builtin_synth"
 
 
+_ACTION_SCENE_CUES = (
+    "jump", "jumping", "vault", "vaulting", "fence", "climb", "climbing", "tree",
+    "wakeboard", "wakeboarding", "surf", "surfing", "run", "running", "sprint", "sprinting",
+    "dive", "diving", "leap", "leaping", "kick", "kicking", "swing", "swinging",
+    "ride", "riding", "parkour", "mid-air", "dodge", "dodging", "sneak", "sneaking",
+    "crouch", "crouching", "balance", "balancing", "action shot",
+)
+
+
+def is_dynamic_action_scene(text: str) -> bool:
+    t = (text or "").lower()
+    return any(cue in t for cue in _ACTION_SCENE_CUES)
+
+
 def clean_character_visual_tags_for_scene(visual_tags: str, scene_text: str) -> str:
     """
     Preserves the character's attractive core beauty, facial, and physical traits while removing
@@ -422,6 +436,10 @@ def clean_character_visual_tags_for_scene(visual_tags: str, scene_text: str) -> 
         ):
             continue
         if seg_l in ("8k", "photorealistic", "masterpiece"):
+            continue
+        if is_dynamic_action_scene(scene_text) and any(
+            static in seg_l for static in ("radiant warm smile", "looking at viewer", "portrait")
+        ):
             continue
         filtered.append(seg)
 
@@ -1045,8 +1063,10 @@ async def harmonize_sdxl_prompt(
         "2. Resolve all conflicts in favor of the CURRENT SCENE & USER REQUEST: if the scene is at night/moonlit/indoors, "
         "drop conflicting sunset/golden-hour tags; if the pose is from behind/walking away, drop 'looking at viewer'; "
         "if the current turn mentions swimwear, undressing, or nudity, NEVER carry over old outfits (dresses, gowns, cloaks, belts) from the situation checkpoint.\n"
-        "3. Remove all duplicate or redundant concepts (never repeat '8k', 'masterpiece', 'wet skin', etc.).\n"
-        "4. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO sentences, NO refusals)."
+        "3. When the scene involves physical action (jumping, climbing, wakeboarding, running, vaulting, etc.), "
+        "prioritize dynamic camera angles, mid-motion body mechanics, environmental interaction, and candid framing (NEVER static portrait posing).\n"
+        "4. Remove all duplicate or redundant concepts (never repeat '8k', 'masterpiece', 'wet skin', etc.).\n"
+        "5. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO sentences, NO refusals)."
     )
 
     user_payload = (
@@ -1513,15 +1533,20 @@ async def build_contextual_scene_prompt(
     physical_traits = clean_character_visual_tags_for_scene(raw_visual_tags, combined_scene_text)
 
     is_pony = "pony" in (config.comfyui_checkpoint or "").lower()
-    active_mode = render_mode_override or getattr(config, "comfyui_render_mode", "hybrid_refiner")
+    active_mode = render_mode_override or getattr(config, "comfyui_render_mode", "action_hybrid")
+    action_scene = is_dynamic_action_scene(f"{user_intent} {char_actions or target_msg.content} {state_tags}")
 
-    if active_mode == "single_raw":
+    if active_mode == "single_raw" or action_scene:
         quality_prefix = (
-            "score_9, score_8_up, score_7_up, masterpiece, photorealistic, 8k, breathtakingly attractive"
+            "score_9, score_8_up, score_7_up, masterpiece, photorealistic, 8k"
             if is_pony
-            else "masterpiece, photorealistic, 8k, breathtakingly attractive"
+            else "masterpiece, photorealistic, 8k"
         )
-        style_suffix = "cinematic lighting, shallow depth of field, intricate skin texture, raw photo"
+        style_suffix = (
+            "dynamic action photography, mid-motion, candid wide full body shot, natural physics, dramatic lighting, crisp detail"
+            if action_scene
+            else "cinematic lighting, shallow depth of field, intricate skin texture, raw photo"
+        )
     else:
         quality_prefix = (
             "score_9, score_8_up, score_7_up, masterpiece, stylized glamour digital art, breathtakingly attractive"
@@ -1552,8 +1577,9 @@ async def build_contextual_scene_prompt(
         if not any(m in scene_focus.lower() for m in ("2girls", "two women", "multiple girls", "group", "crowd", "threesome"))
         else ""
     )
+    action_tags = "dynamic action shot, mid-motion, candid full body, natural physics" if action_scene else ""
     final_tags = dedupe_and_resolve_prompt_conflicts(
-        [quality_prefix, anat_boost, solo_tag, state_tags, physical_traits, cleaned_harmonized_kw],
+        [quality_prefix, anat_boost, solo_tag, action_tags, state_tags, physical_traits, cleaned_harmonized_kw],
         scene_text=f"{scene_focus} {state_tags}",
     )
     return ", ".join(final_tags)

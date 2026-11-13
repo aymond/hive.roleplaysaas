@@ -377,6 +377,9 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
                   }
                   className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-xs text-amber-200"
                 >
+                  <option value="action_hybrid">
+                    Action Hybrid (Juggernaut Action → Pony Refine → FacePolish)
+                  </option>
                   <option value="hybrid_refiner">
                     Option 1: 2-Stage Hybrid (Uncensored Pony Base → Golden-Hour SDXL Refiner)
                   </option>

@@ -535,6 +535,36 @@ def test_scene_state_injected_directly_into_scene_prompt(monkeypatch) -> None:
     assert prompt.index("sleek black jumpsuit") < prompt.index("cinematic lighting")
 
 
+def test_dynamic_action_scene_strips_portrait_bias(monkeypatch) -> None:
+    async def fake_harmonize(**kwargs):
+        return "mid-air vaulting over iron fence, night villa garden, dramatic lighting", "mock"
+
+    monkeypatch.setattr("backend.inference.llm_engine.harmonize_sdxl_prompt", fake_harmonize)
+
+    char = CharacterCard(
+        name="Liamching",
+        visual_prompt_tags="1girl, stunning asian woman, radiant warm smile, tousled dark chestnut hair",
+    )
+    msg = ChatMessage(
+        role="assistant",
+        sender_name="Liamching",
+        content="*She sprints and vaults over the tall iron fence into the villa garden.*",
+    )
+    prompt = asyncio.run(
+        build_contextual_scene_prompt(
+            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors"),
+            char,
+            [msg],
+            msg,
+        )
+    )
+    assert "dynamic action shot" in prompt
+    assert "mid-motion" in prompt
+    assert "radiant warm smile" not in prompt
+    assert "stylized glamour digital art" not in prompt
+
+
+
 
 
 

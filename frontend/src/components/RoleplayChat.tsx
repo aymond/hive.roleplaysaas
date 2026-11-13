@@ -123,8 +123,8 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [includeWorldLore, setIncludeWorldLore] = useState(true);
   const [useLlmDirector, setUseLlmDirector] = useState(true);
   const [renderMode, setRenderMode] = useState<
-    'hybrid_refiner' | 'single_stylized' | 'single_raw'
-  >('single_stylized');
+    'hybrid_refiner' | 'single_stylized' | 'single_raw' | 'action_hybrid'
+  >('action_hybrid');
   const [faceDetailer, setFaceDetailer] = useState(true);
   const [aspectRatio, setAspectRatio] = useState<
     '768x1024' | '512x768' | '768x768' | '1024x768' | '512x512' | '768x512'
@@ -1103,12 +1103,15 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                     value={renderMode}
                     onChange={(e) =>
                       setRenderMode(
-                        e.target.value as 'hybrid_refiner' | 'single_stylized' | 'single_raw'
+                        e.target.value as 'hybrid_refiner' | 'single_stylized' | 'single_raw' | 'action_hybrid'
                       )
                     }
                     disabled={generatingBackstoryImg}
                     className="w-full bg-[#141926] border border-amber-500/30 rounded-lg px-2 py-1.5 text-[11px] text-amber-100"
                   >
+                    <option value="action_hybrid">
+                      Action Hybrid (Juggernaut Action → Pony Refine → FacePolish)
+                    </option>
                     <option value="single_stylized">
                       Option 1 (Recommended): Single Checkpoint + Painterly Golden-Hour Style
                     </option>
