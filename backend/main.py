@@ -724,7 +724,13 @@ async def illustrate_chat_message(
         char_name=card.name if card else "Character",
         user_name=session.user_persona_name,
     )
-    lore_visuals = lore_res.visual_tags_block or (world.aesthetic_style if world else "")
+    has_tracked_setting = bool(
+        (session.scene_state.location or "").strip()
+        or (session.scene_state.time_and_lighting or "").strip()
+    )
+    lore_visuals = lore_res.visual_tags_block or (
+        "" if has_tracked_setting else (world.aesthetic_style if world else "")
+    )
 
     if custom_prompt:
         full_prompt = custom_prompt
