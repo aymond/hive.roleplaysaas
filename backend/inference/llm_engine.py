@@ -411,12 +411,45 @@ def build_anatomical_and_clothing_overrides(
     distilled_keywords: str = "",
 ) -> tuple[str, str, str]:
     """
-    Detects explicit nudity / breast / vulva / labia requests in the active turn or distilled tags
-    and returns:
+    Detects explicit pose, camera angle (e.g., from behind / rear view), attire (e.g., bikini),
+    or nudity / breast / vulva / labia requests in the active turn and returns:
       (weighted_positive_boost_tags, cleaned_distilled_keywords, negative_clothing_blockers)
-    so that Pony / SDXL models strictly obey anatomical requests without defaulting back to bikinis/crops.
+    so that Pony / SDXL models strictly obey the current turn's pose and attire.
     """
+    scene_lower = (scene_text or "").lower()
     combined = f"{scene_text} {distilled_keywords}".lower()
+
+    wants_rear_view = any(
+        k in combined
+        for k in (
+            "from behind",
+            "walking away",
+            "walk away",
+            "rear view",
+            "back view",
+            "backside",
+            "your back",
+            "bare back",
+            "her back",
+            "butt",
+            "derriere",
+            "glutes",
+            "ass from behind",
+        )
+    )
+
+    explicit_attire_in_turn = any(
+        k in scene_lower
+        for k in (
+            "bikini",
+            "swimsuit",
+            "swimwear",
+            "lingerie",
+            "sundress",
+            "wearing a dress",
+            "wearing clothes",
+        )
+    )
 
     wants_lower_nudity = any(
         k in combined
@@ -440,35 +473,42 @@ def build_anatomical_and_clothing_overrides(
         for k in (
             "breast",
             "breasts",
+            "boobs",
+            "tits",
             "nipple",
             "nipples",
             "areola",
             "topless",
             "bare chest",
-            "expose",
-            "exposing",
             "unclasp",
             "pulls down top",
             "slides off top",
         )
     )
-    wants_full_nudity = any(
-        k in combined
-        for k in (
-            "nude",
-            "naked",
-            "nudist",
-            "undress",
-            "strips",
-            "slipping off",
-            "slips off",
-            "without clothes",
-            "bare skin",
+    wants_full_nudity = (
+        not explicit_attire_in_turn
+        and any(
+            k in combined
+            for k in (
+                "nude",
+                "naked",
+                "nudist",
+                "undress",
+                "strips",
+                "slipping off",
+                "slips off",
+                "without clothes",
+            )
         )
     )
 
     pos_boosts: list[str] = []
     neg_blockers: list[str] = []
+
+    if wants_rear_view:
+        pos_boosts.append("(from behind, rear view, back view, walking away from camera:1.35)")
+        if not wants_upper_nudity and not wants_lower_nudity:
+            neg_blockers.append("front view")
 
     if wants_lower_nudity:
         pos_boosts.extend(
@@ -502,7 +542,7 @@ def build_anatomical_and_clothing_overrides(
         if not wants_lower_nudity:
             pos_boosts.append("(nsfw, uncensored, topless, nude:1.3)")
         pos_boosts.append("(bare breasts, exposed breasts, detailed nipples, areolae:1.35)")
-        if not wants_lower_nudity:
+        if not wants_lower_nudity and not wants_rear_view:
             pos_boosts.append("(cowboy shot, upper body and waist visible:1.2)")
         neg_blockers.extend(
             [
@@ -520,12 +560,15 @@ def build_anatomical_and_clothing_overrides(
         )
 
     if wants_full_nudity and not (wants_lower_nudity or wants_upper_nudity):
-        pos_boosts.extend(
-            [
-                "(nsfw, uncensored, completely nude, naked:1.3)",
-                "(bare breasts, nipples, pussy, full body:1.25)",
-            ]
-        )
+        if wants_rear_view:
+            pos_boosts.append("(nsfw, uncensored, completely nude, naked, bare back, bare buttocks, full body:1.3)")
+        else:
+            pos_boosts.extend(
+                [
+                    "(nsfw, uncensored, completely nude, naked:1.3)",
+                    "(bare breasts, nipples, pussy, full body:1.25)",
+                ]
+            )
         neg_blockers.extend(
             [
                 "clothed",
@@ -541,10 +584,10 @@ def build_anatomical_and_clothing_overrides(
             ]
         )
 
-    # If the user wants nudity/exposed anatomy, strip any lingering 'bikini'/'dress'/'swimsuit' words
-    # from the LLM-distilled keywords so CLIP doesn't draw a bikini anyway
+    # If the user wants nudity/exposed anatomy (and did not explicitly ask for attire in this turn),
+    # strip any lingering 'bikini'/'dress'/'swimsuit' words from the LLM-distilled keywords.
     cleaned_kw = distilled_keywords
-    if wants_lower_nudity or wants_upper_nudity or wants_full_nudity:
+    if (wants_lower_nudity or wants_upper_nudity or wants_full_nudity) and not explicit_attire_in_turn:
         filtered_tags: list[str] = []
         for tag in distilled_keywords.split(","):
             t_clean = tag.strip()
@@ -860,7 +903,7 @@ async def build_contextual_scene_prompt(
     )
 
     anat_boost, cleaned_distilled_kw, _ = build_anatomical_and_clothing_overrides(
-        scene_text=f"{user_intent} {char_actions or target_msg.content} {scenario_text}",
+        scene_text=f"{user_intent} {char_actions or target_msg.content}",
         distilled_keywords=distilled_keywords,
     )
 

@@ -262,6 +262,22 @@ def test_contextual_scene_prompt_extraction() -> None:
     assert "bare breasts" not in pos_face
     assert "asymmetric eyes" in neg_face
 
+    # Verify rear-view pose and explicit attire overrides
+    rear_boost, _, rear_neg = build_anatomical_and_clothing_overrides(
+        scene_text="walking away from the camera, expose your back and your butt",
+        distilled_keywords="walking away, bare back, sunset beach",
+    )
+    assert "from behind, rear view" in rear_boost
+    assert "bare breasts" not in rear_boost
+
+    bikini_boost, bikini_kw, bikini_neg = build_anatomical_and_clothing_overrides(
+        scene_text="I want to see you in your bikini again, walking slow away from me",
+        distilled_keywords="white bikini, walking away, rear view, beach",
+    )
+    assert "from behind, rear view" in bikini_boost
+    assert "white bikini" in bikini_kw
+    assert "bikini" not in bikini_neg
+
 
 
 
