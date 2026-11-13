@@ -9,8 +9,10 @@ from backend.inference.llm_engine import (
     build_contextual_scene_prompt,
     build_face_detailer_prompt,
     clean_character_visual_tags_for_scene,
+    dedupe_and_resolve_prompt_conflicts,
     extract_action_and_scene_beats,
     fallback_extract_sdxl_keywords,
+    harmonize_sdxl_prompt,
 )
 from backend.lore_engine import scan_lorebook
 from backend.main import app
@@ -277,6 +279,59 @@ def test_contextual_scene_prompt_extraction() -> None:
     assert "from behind, rear view" in bikini_boost
     assert "white bikini" in bikini_kw
     assert "bikini" not in bikini_neg
+
+
+def test_prompt_conflict_resolution_and_dedup() -> None:
+    raw_segments = [
+        "score_9, masterpiece, 8k",
+        "(from behind, rear view, walking away from camera:1.35)",
+        "from behind, looking at viewer, velvet cloak, completely nude, full body, close-up, warm sunset rim lighting, 8k, masterpiece",
+    ]
+    resolved = dedupe_and_resolve_prompt_conflicts(
+        raw_segments,
+        scene_text="moonlit courtyard at midnight, walking away from behind, completely nude",
+    )
+    joined = ", ".join(resolved).lower()
+    assert joined.count("8k") == 1
+    assert joined.count("masterpiece") == 1
+    assert "from behind" in joined
+    assert "looking at viewer" not in joined
+    assert "close-up" not in joined
+    assert "warm sunset" not in joined
+    assert "velvet cloak" not in joined
+
+
+def test_harmonize_sdxl_prompt_fallback_on_refusal(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_ollama_chat(config, messages, purpose="chat", temperature_override=None, repeat_penalty=1.18, seed=None, model_override=None):
+        used = model_override or config.ollama_model
+        calls.append(used)
+        if used == "llama3.2:latest":
+            return "I cannot fulfill this request."
+        return "full body shot, completely nude, turquoise lagoon, wet skin, silver hair, moonlit night"
+
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", fake_ollama_chat)
+
+    cfg = InferenceConfig(
+        llm_provider="ollama",
+        ollama_model="hermes3:8b",
+        prompt_refiner_model="llama3.2:latest",
+    )
+    tags, provider = asyncio.run(
+        harmonize_sdxl_prompt(
+            config=cfg,
+            user_intent_text="completely nude in the moonlit lagoon",
+            action_or_scene_text="wading into the water",
+            character_traits="silver hair, violet eyes",
+            style_hint="luminous rim lighting",
+        )
+    )
+    assert calls == ["llama3.2:latest", "hermes3:8b"]
+    assert "hermes3:8b" in provider
+    assert "I cannot" not in tags
+    assert "turquoise lagoon" in tags
+
 
 
 

@@ -20,9 +20,11 @@ from .inference.llm_engine import (
     check_ollama_status,
     check_openai_compat_status,
     clean_character_visual_tags_for_scene,
+    dedupe_and_resolve_prompt_conflicts,
     distill_narrative_to_sdxl_keywords,
     fallback_extract_sdxl_keywords,
     generate_roleplay_reply,
+    harmonize_sdxl_prompt,
 )
 from .logger import logger, set_hivemind_log_level
 from .lore_engine import replace_tavern_macros, scan_lorebook
@@ -890,44 +892,49 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         triggered_lore_list = [t.model_dump() for t in lore_res.triggered]
         lore_visuals_to_distill = lore_res.visual_tags_block or world.aesthetic_style or ""
 
-    # 3. Distill Scenario & Lore into concise SDXL visual keywords and put BEFORE static character traits
-    llm_provider_used = None
-    distilled_kw = ""
-    if scenario_to_distill or lore_visuals_to_distill or req.use_llm_director:
-        if req.use_llm_director or scenario_to_distill:
-            distilled_kw, llm_provider_used = await distill_narrative_to_sdxl_keywords(
-                config=storage.config,
-                scenario_text=scenario_to_distill,
-                action_or_scene_text=req.custom_prompt.strip(),
-                user_intent_text=req.custom_prompt.strip(),
-                lore_visuals=lore_visuals_to_distill,
-            )
-        elif lore_visuals_to_distill:
-            distilled_kw = lore_visuals_to_distill
-
-    anat_boost, cleaned_distilled_kw, _ = build_anatomical_and_clothing_overrides(
-        scene_text=f"{req.custom_prompt} {scenario_to_distill}",
-        distilled_keywords=distilled_kw,
-    )
-    if anat_boost:
-        prompt_segments.append(anat_boost)
-    if cleaned_distilled_kw:
-        prompt_segments.append(cleaned_distilled_kw)
-
-    # 4. Character visual prompt tags & physical beauty traits (cleaned of conflicting static clothing / portrait crop)
+    # 3. Character visual prompt tags & physical beauty traits (cleaned of conflicting static clothing / portrait crop)
+    char_traits = ""
     if req.include_character_visuals and card:
         if card.visual_prompt_tags:
-            cleaned_tags = clean_character_visual_tags_for_scene(
+            char_traits = clean_character_visual_tags_for_scene(
                 card.visual_prompt_tags,
                 f"{req.custom_prompt} {card.scenario or ''}",
             )
-            prompt_segments.append(cleaned_tags)
         elif card.description:
             clean_desc = replace_tavern_macros(card.description, char_name=card.name, user_name="Traveler")
-            prompt_segments.append(fallback_extract_sdxl_keywords(clean_desc, max_keywords=8))
+            char_traits = fallback_extract_sdxl_keywords(clean_desc, max_keywords=8)
 
-    prompt_segments.append(style_suffix)
-    assembled_prompt = ", ".join(p.strip().rstrip(",") for p in prompt_segments if p and p.strip())
+    # 4. Harmonize Scenario, Lore, Character Traits, and Style via small LLM + conflict/dedup guard
+    llm_provider_used = None
+    harmonized_kw = ""
+    if scenario_to_distill or lore_visuals_to_distill or req.use_llm_director:
+        if req.use_llm_director or scenario_to_distill:
+            harmonized_kw, llm_provider_used = await harmonize_sdxl_prompt(
+                config=storage.config,
+                user_intent_text=req.custom_prompt.strip(),
+                action_or_scene_text=req.custom_prompt.strip(),
+                scenario_text=scenario_to_distill,
+                lore_visuals=lore_visuals_to_distill,
+                character_traits=char_traits,
+                style_hint=style_suffix,
+            )
+        elif lore_visuals_to_distill:
+            harmonized_kw = ", ".join(p for p in (lore_visuals_to_distill, char_traits, style_suffix) if p)
+    else:
+        harmonized_kw = ", ".join(p for p in (req.custom_prompt.strip(), char_traits, style_suffix) if p)
+
+    scene_focus = f"{req.custom_prompt} {scenario_to_distill}"
+    anat_boost, cleaned_harmonized_kw, _ = build_anatomical_and_clothing_overrides(
+        scene_text=scene_focus,
+        distilled_keywords=harmonized_kw,
+    )
+    if anat_boost:
+        prompt_segments.append(anat_boost)
+    if cleaned_harmonized_kw:
+        prompt_segments.append(cleaned_harmonized_kw)
+
+    final_tags = dedupe_and_resolve_prompt_conflicts(prompt_segments, scene_text=scene_focus)
+    assembled_prompt = ", ".join(final_tags)
 
     neg_prompt = card.negative_prompt_tags if card else "blurry, low quality, deformed, watermark"
 

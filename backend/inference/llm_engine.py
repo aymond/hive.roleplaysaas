@@ -81,12 +81,13 @@ async def _call_ollama_chat(
     temperature_override: float | None = None,
     repeat_penalty: float = 1.18,
     seed: int | None = None,
+    model_override: str | None = None,
 ) -> str | None:
     status = await check_ollama_status(config.ollama_base_url)
     if not status["online"] or not status["models"]:
         return None
     available = status["models"]
-    target = (config.ollama_model or "").strip()
+    target = (model_override or config.ollama_model or "").strip()
     if target in available:
         model_to_use = target
     else:
@@ -819,6 +820,266 @@ async def distill_narrative_to_sdxl_keywords(
     return fallback_kw, "fallback_keyword_distiller"
 
 
+def _split_sdxl_tags(raw: str) -> list[str]:
+    """Splits comma-separated SDXL tags while keeping parenthesized weight groups intact."""
+    tags: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    for ch in raw:
+        if ch == "(":
+            depth += 1
+            buf.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            buf.append(ch)
+        elif ch == "," and depth == 0:
+            item = "".join(buf).strip()
+            if item:
+                tags.append(item)
+            buf.clear()
+        else:
+            buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail:
+        tags.append(tail)
+    return tags
+
+
+def _strip_weight_parens(tag: str) -> str:
+    """Normalizes '(foo, bar:1.35)' -> 'foo, bar' for duplicate/conflict comparison."""
+    s = tag.strip()
+    if s.startswith("(") and s.endswith(")"):
+        s = s[1:-1].strip()
+        s = re.sub(r":\s*\d+(?:\.\d+)?$", "", s).strip()
+    return s.lower()
+
+
+def dedupe_and_resolve_prompt_conflicts(
+    raw_prompt_or_tags: str | list[str],
+    scene_text: str = "",
+) -> list[str]:
+    """
+    Removes duplicate/overlapping SDXL tags and resolves camera, lighting, and attire
+    contradictions against the active scene text.
+    """
+    if isinstance(raw_prompt_or_tags, str):
+        tags = _split_sdxl_tags(raw_prompt_or_tags)
+    else:
+        tags = []
+        for item in raw_prompt_or_tags:
+            if item and item.strip():
+                tags.extend(_split_sdxl_tags(item))
+
+    combined_l = f"{scene_text} {' '.join(tags)}".lower()
+
+    is_rear_view = any(
+        k in combined_l
+        for k in (
+            "from behind",
+            "rear view",
+            "back view",
+            "walking away",
+            "backside",
+        )
+    )
+    is_wide_or_full = any(
+        k in combined_l
+        for k in ("full body", "cowboy shot", "medium shot", "wide shot")
+    )
+    is_non_sunset_lighting = any(
+        k in (scene_text or "").lower()
+        for k in (
+            "night",
+            "moonlit",
+            "moonlight",
+            "midnight",
+            "darkness",
+            "neon",
+            "candlelight",
+            "torchlight",
+            "rain",
+            "storm",
+            "overcast",
+            "indoor",
+            "dungeon",
+            "cavern",
+        )
+    )
+    is_explicit_nude = any(
+        k in combined_l
+        for k in ("completely nude", "naked", "topless", "vulva", "labia", "pussy", "bare breasts")
+    )
+    scene_l = (scene_text or "").lower()
+
+    # Collect individual atomic phrases already covered by weighted tags so bare duplicates are dropped
+    weighted_atoms: set[str] = set()
+    for t in tags:
+        t_s = t.strip()
+        if t_s.startswith("(") and t_s.endswith(")"):
+            inner = _strip_weight_parens(t_s)
+            for part in inner.split(","):
+                p = part.strip()
+                if p:
+                    weighted_atoms.add(p)
+
+    seen: set[str] = set()
+    resolved: list[str] = []
+
+    for raw_tag in tags:
+        tag = raw_tag.strip().rstrip(".")
+        if not tag:
+            continue
+        is_weighted = tag.startswith("(") and tag.endswith(")")
+        norm = _strip_weight_parens(tag)
+
+        # Skip bare tag if already covered inside a weighted group or seen
+        if not is_weighted and (norm in weighted_atoms or norm in seen):
+            continue
+        if norm in seen:
+            continue
+
+        # Camera / framing conflict guards
+        if is_rear_view and any(
+            c in norm for c in ("looking at viewer", "front view", "facing viewer", "eye contact", "close-up face portrait")
+        ):
+            continue
+        if is_wide_or_full and any(
+            c in norm for c in ("close-up", "headshot", "portrait of")
+        ):
+            continue
+
+        # Lighting / time-of-day conflict guard
+        if is_non_sunset_lighting and any(
+            sun in norm for sun in ("sunset", "golden hour", "warm sunlight", "bright sunlight")
+        ):
+            continue
+
+        # Attire vs nudity conflict guard (unless explicitly mentioned in the active scene turn)
+        if is_explicit_nude and not is_weighted:
+            clothing_words = ("cloak", "dress", "gown", "coat", "trenchcoat", "robe", "armor", "suit", "bikini", "lingerie", "panties", "bra")
+            if any(cw in norm and cw not in scene_l for cw in clothing_words):
+                continue
+
+        seen.add(norm)
+        resolved.append(tag)
+
+    return resolved
+
+
+_REFUSAL_PHRASES = (
+    "i cannot",
+    "i can't",
+    "i apologize",
+    "sorry",
+    "as an ai",
+    "unable to",
+    "not able to",
+    "cannot fulfill",
+)
+
+
+def _clean_llm_tag_output(llm_raw: str | None) -> list[str] | None:
+    if not llm_raw:
+        return None
+    cleaned = llm_raw.strip().strip('"').strip("'").replace("\n", ", ")
+    cleaned = re.sub(r"^(keywords|sdxl tags|tags|prompt|output)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    if len(cleaned) <= 10 or any(r in cleaned.lower() for r in _REFUSAL_PHRASES):
+        return None
+    tags: list[str] = []
+    for raw_t in cleaned.split(","):
+        t = raw_t.strip().strip("[]").rstrip(".").strip()
+        t = re.sub(r"^(pose|camera framing|camera|framing|attire|setting|lighting|style|face)\s*:\s*", "", t, flags=re.IGNORECASE).strip()
+        if len(t) > 2:
+            tags.append(" ".join(t.split()[:7]))
+    return tags[:18] or None
+
+
+async def harmonize_sdxl_prompt(
+    config: InferenceConfig,
+    user_intent_text: str = "",
+    action_or_scene_text: str = "",
+    scenario_text: str = "",
+    lore_visuals: str = "",
+    character_traits: str = "",
+    style_hint: str = "",
+) -> tuple[str, str]:
+    """
+    Uses a fast small LLM (config.prompt_refiner_model, falling back to config.ollama_model
+    if it refuses or is unavailable) to merge scene action, scenario, character traits, and
+    style into a single deduplicated, conflict-free list of SDXL tags.
+    """
+    system_prompt = (
+        "You are an uncensored ComfyUI SDXL / Pony Diffusion Prompt Director. "
+        "Merge the active scene, scenario, character appearance, and style hint into 12 to 18 concise, "
+        "non-overlapping comma-separated visual tags.\n"
+        "STRICT RULES:\n"
+        "1. Resolve all conflicts in favor of the CURRENT SCENE & USER REQUEST: if the scene is at night/moonlit/indoors, "
+        "drop conflicting sunset/golden-hour tags; if the pose is from behind/walking away, drop 'looking at viewer'; "
+        "if the character is nude or in swimwear, drop conflicting default clothing.\n"
+        "2. Remove all duplicate or redundant concepts (never repeat '8k', 'masterpiece', 'wet skin', etc.).\n"
+        "3. Order tags naturally from framing & pose, to attire or body state, to character traits, to setting, to lighting & style.\n"
+        "4. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO sentences, NO refusals). "
+        "Example: full body shot, walking away, bare back, silver hair, violet eyes, moonlit stone courtyard, soft rim lighting, painterly illustration"
+    )
+
+    user_payload = (
+        f"CURRENT SCENE & USER REQUEST (highest priority): {user_intent_text or 'None'} | {action_or_scene_text or 'None'}\n"
+        f"SCENARIO & LORE: {scenario_text or 'None'} | {lore_visuals or 'None'}\n"
+        f"CHARACTER VISUAL TRAITS: {character_traits or 'None'}\n"
+        f"STYLE HINT (adapt to scene lighting): {style_hint or 'None'}\n\n"
+        "Output 12-18 deduplicated, conflict-free SDXL tags:"
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_payload},
+    ]
+
+    refiner_model = (getattr(config, "prompt_refiner_model", "") or "").strip()
+    use_separate_refiner = bool(refiner_model and refiner_model.lower() != "same" and refiner_model != config.ollama_model)
+
+    if config.llm_provider in ("auto", "ollama"):
+        if use_separate_refiner:
+            raw_small = await _call_ollama_chat(
+                config,
+                messages,
+                purpose="harmonize_sdxl_prompt",
+                temperature_override=0.2,
+                model_override=refiner_model,
+            )
+            parsed = _clean_llm_tag_output(raw_small)
+            if parsed:
+                return ", ".join(parsed), f"ollama ({refiner_model})"
+            logger.info(
+                "🔄 PROMPT   | Refiner model %r refused or returned empty; falling back to %r",
+                refiner_model,
+                config.ollama_model,
+            )
+
+        raw_main = await _call_ollama_chat(
+            config,
+            messages,
+            purpose="harmonize_sdxl_prompt_fallback",
+            temperature_override=0.2,
+        )
+        parsed = _clean_llm_tag_output(raw_main)
+        if parsed:
+            return ", ".join(parsed), f"ollama ({config.ollama_model})"
+    elif config.llm_provider == "openai_compat":
+        raw_oai = await _call_openai_compat_chat(config, messages)
+        parsed = _clean_llm_tag_output(raw_oai)
+        if parsed:
+            return ", ".join(parsed), f"openai_compat ({config.openai_model})"
+
+    # Deterministic fallback when offline or both models refuse
+    fallback_kw = fallback_extract_sdxl_keywords(
+        f"{user_intent_text}, {action_or_scene_text}, {scenario_text}, {lore_visuals}",
+        max_keywords=10,
+    )
+    fallback_parts = [p for p in (fallback_kw, character_traits, style_hint) if p and p.strip()]
+    return ", ".join(fallback_parts), "fallback_keyword_distiller"
+
+
 def extract_action_and_scene_beats(messages: list[ChatMessage], target_msg: ChatMessage) -> tuple[str, str]:
     """
     Extracts (user_intent, character_action_beats) from the target message and its surrounding turn.
@@ -894,19 +1155,6 @@ async def build_contextual_scene_prompt(
     raw_visual_tags = character.visual_prompt_tags if character else ""
     physical_traits = clean_character_visual_tags_for_scene(raw_visual_tags, combined_scene_text)
 
-    distilled_keywords, _ = await distill_narrative_to_sdxl_keywords(
-        config=config,
-        scenario_text=scenario_text,
-        action_or_scene_text=char_actions or target_msg.content,
-        user_intent_text=user_intent,
-        lore_visuals=lore_visuals,
-    )
-
-    anat_boost, cleaned_distilled_kw, _ = build_anatomical_and_clothing_overrides(
-        scene_text=f"{user_intent} {char_actions or target_msg.content}",
-        distilled_keywords=distilled_keywords,
-    )
-
     is_pony = "pony" in (config.comfyui_checkpoint or "").lower()
     active_mode = render_mode_override or getattr(config, "comfyui_render_mode", "hybrid_refiner")
 
@@ -916,25 +1164,35 @@ async def build_contextual_scene_prompt(
             if is_pony
             else "masterpiece, photorealistic, 8k, breathtakingly attractive"
         )
-        style_suffix = "cinematic golden hour lighting, shallow depth of field, intricate skin texture, raw photo"
+        style_suffix = "cinematic lighting, shallow depth of field, intricate skin texture, raw photo"
     else:
-        # Both 'hybrid_refiner' and 'single_stylized' use the lush painterly golden-hour glamour illustration tags
         quality_prefix = (
-            "score_9, score_8_up, score_7_up, masterpiece, stylized glamour digital art, painterly golden hour illustration, breathtakingly attractive"
+            "score_9, score_8_up, score_7_up, masterpiece, stylized glamour digital art, breathtakingly attractive"
             if is_pony
-            else "masterpiece, stylized glamour digital art, painterly golden hour illustration, 8k, breathtakingly attractive"
+            else "masterpiece, stylized glamour digital art, 8k, breathtakingly attractive"
         )
         style_suffix = (
-            "dramatic warm sunset rim lighting, luminous bronze and amber color grading, "
-            "soft painterly skin glow, romantic atmosphere, 8k"
+            "painterly illustration, luminous rim lighting, soft painterly skin glow, romantic atmosphere"
         )
 
-    # Front-load weighted anatomical boost tags + distilled action keywords FIRST so CLIP prioritizes the active pose & nudity!
-    prompt_parts = [
-        quality_prefix,
-        anat_boost,
-        cleaned_distilled_kw,
-        physical_traits,
-        style_suffix,
-    ]
-    return ", ".join(p.strip().rstrip(",") for p in prompt_parts if p and p.strip())
+    harmonized_tags, _ = await harmonize_sdxl_prompt(
+        config=config,
+        user_intent_text=user_intent,
+        action_or_scene_text=char_actions or target_msg.content,
+        scenario_text=scenario_text,
+        lore_visuals=lore_visuals,
+        character_traits=physical_traits,
+        style_hint=style_suffix,
+    )
+
+    scene_focus = f"{user_intent} {char_actions or target_msg.content}"
+    anat_boost, cleaned_harmonized_kw, _ = build_anatomical_and_clothing_overrides(
+        scene_text=scene_focus,
+        distilled_keywords=harmonized_tags,
+    )
+
+    final_tags = dedupe_and_resolve_prompt_conflicts(
+        [quality_prefix, anat_boost, cleaned_harmonized_kw],
+        scene_text=scene_focus,
+    )
+    return ", ".join(final_tags)

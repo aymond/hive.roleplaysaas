@@ -162,6 +162,7 @@ class InferenceConfig(BaseModel):
     llm_provider: Literal["auto", "ollama", "openai_compat", "builtin_synth"] = "auto"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "llama3.2:latest"
+    prompt_refiner_model: str = "llama3.2:latest"
     openai_base_url: str = "http://127.0.0.1:1234/v1"
     openai_api_key: str = "lm-studio"
     openai_model: str = "local-model"
