@@ -1498,9 +1498,9 @@ async def build_contextual_scene_prompt(
     state_tags = format_scene_state_tags(scene_state)
     scenario_text = ""
     if state_tags:
+        # SceneState already holds the structured current location, lighting, attire, hair, and pose;
+        # avoid feeding stale attire/setting prose from older situation_checkpoint summaries into the image director.
         scenario_text = f"TRACKED VISUAL STATE: {state_tags}"
-        if situation_checkpoint and situation_checkpoint.strip():
-            scenario_text += f" | {situation_checkpoint.strip()}"
     elif situation_checkpoint and situation_checkpoint.strip():
         scenario_text = situation_checkpoint.strip()
     elif character and character.scenario:
