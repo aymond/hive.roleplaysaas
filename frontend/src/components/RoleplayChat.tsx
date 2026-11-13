@@ -100,7 +100,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [useLlmDirector, setUseLlmDirector] = useState(true);
   const [renderMode, setRenderMode] = useState<
     'hybrid_refiner' | 'single_stylized' | 'single_raw'
-  >('hybrid_refiner');
+  >('single_stylized');
   const [aspectRatio, setAspectRatio] = useState<'512x512' | '512x768' | '768x512'>('512x768');
   const [generatingBackstoryImg, setGeneratingBackstoryImg] = useState(false);
   const [lastBackstoryPromptUsed, setLastBackstoryPromptUsed] = useState<string | null>(null);
@@ -810,11 +810,11 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                     disabled={generatingBackstoryImg}
                     className="w-full bg-[#141926] border border-amber-500/30 rounded-lg px-2 py-1.5 text-[11px] text-amber-100"
                   >
-                    <option value="hybrid_refiner">
-                      Option 1: 2-Stage Hybrid (Pony Uncensored Pose → SDXL Golden-Hour Style)
-                    </option>
                     <option value="single_stylized">
-                      Option 2: Single Checkpoint + Painterly Golden-Hour Glamour Style
+                      Option 1 (Recommended): Single Checkpoint + Painterly Golden-Hour Style
+                    </option>
+                    <option value="hybrid_refiner">
+                      Option 2: 2-Stage Img2Img Hybrid (Pony Pose → SDXL Golden-Hour Refiner)
                     </option>
                     <option value="single_raw">
                       Option 3: Single Checkpoint + Raw Unfiltered Photo Style

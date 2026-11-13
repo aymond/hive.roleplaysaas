@@ -429,9 +429,22 @@ async def _run_comfyui_bridge(
         )
         ckpt_to_use = matched
 
-    active_mode = render_mode_override or getattr(config, "comfyui_render_mode", "hybrid_refiner")
-    sampler_name = getattr(config, "comfyui_sampler", "dpmpp_2m_sde") or "dpmpp_2m_sde"
+    active_mode = render_mode_override or getattr(config, "comfyui_render_mode", "single_stylized")
+    sampler_name = getattr(config, "comfyui_sampler", "dpmpp_2m") or "dpmpp_2m"
     scheduler_name = getattr(config, "comfyui_scheduler", "karras") or "karras"
+
+    # Auto-tune steps & CFG for Turbo / Lightning checkpoints so they render in ~4s and never burn/saturate faces
+    is_turbo_ckpt = any(k in ckpt_to_use.lower() for k in ("turbo", "lightning", "hyper"))
+    if is_turbo_ckpt and active_mode != "hybrid_refiner":
+        steps = min(steps, 8)
+        cfg = min(cfg, 2.2)
+        sampler_name = "dpmpp_sde"
+        scheduler_name = "karras"
+    else:
+        # Clamp CFG <= 6.0 to prevent bright red/cyan saturation burn on faces during golden hour scenes
+        cfg = min(cfg, 6.0)
+        if sampler_name == "dpmpp_2m_sde":
+            sampler_name = "dpmpp_2m"
 
     # Determine if we can run the 2-stage Hybrid Refiner (Pony/Base -> Artistic SDXL Refiner)
     refiner_ckpt = getattr(config, "comfyui_refiner_checkpoint", "sd_xl_base_1.0_0.9vae.safetensors")
@@ -453,22 +466,22 @@ async def _run_comfyui_bridge(
     is_pony_primary = "pony" in ckpt_to_use.lower()
     neg_text = (
         negative_prompt
-        or "score_4, score_5, score_6, blurry, low quality, flat lighting, washed out, amateur snapshot, deformed, bad anatomy"
+        or "score_4, score_5, score_6, blurry, low quality, flat lighting, washed out, oversaturated, burnt face, red nose, clown makeup, deformed, bad anatomy"
     )
 
     if use_hybrid:
         # Stage 1 (Uncensored Pose & Anatomy on Primary Model, e.g. CyberRealisticPony) ->
         # Stage 2 (Golden-Hour Painterly Aesthetic & Celebrity Facial Polish on Refiner Model, e.g. sd_xl_base_1.0)
-        switch_ratio = max(0.35, min(0.85, float(getattr(config, "comfyui_refiner_switch", 0.65))))
-        split_step = max(1, min(steps - 1, int(round(steps * switch_ratio))))
-        # Strip Pony-only score tags for the non-Pony refiner CLIP so it focuses on artistic style & facial features
+        # Use img2img latent handoff (VAEDecode -> VAEEncode -> KSampler denoise=0.38) instead of KSamplerAdvanced
+        # because Pony and SDXL Base have incompatible latent noise scales mid-schedule (which causes red/cyan face burn).
+        stage1_steps = max(12, int(round(steps * 0.8)))
         refiner_prompt = (
             prompt.replace("score_9, score_8_up, score_7_up,", "")
             .replace("score_9, score_8_up, score_7_up", "")
             .strip()
         )
         refiner_prompt = (
-            f"masterpiece stylized glamour digital art, warm golden hour sunset rim lighting, "
+            f"masterpiece stylized glamour digital art, natural beautiful face, warm golden hour sunset rim lighting, "
             f"luminous bronze and amber color grading, {refiner_prompt}"
         )
 
@@ -494,26 +507,31 @@ async def _run_comfyui_bridge(
                 "inputs": {"clip": ["10", 0], "text": neg_text},
             },
             "3": {
-                "class_type": "KSamplerAdvanced",
+                "class_type": "KSampler",
                 "inputs": {
-                    "add_noise": "enable",
-                    "noise_seed": seed,
-                    "steps": steps,
-                    "cfg": cfg,
-                    "sampler_name": sampler_name,
-                    "scheduler": scheduler_name,
+                    "seed": seed,
+                    "steps": stage1_steps,
+                    "cfg": min(cfg, 5.5),
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
                     "positive": ["6", 0],
                     "negative": ["7", 0],
                     "latent_image": ["5", 0],
-                    "start_at_step": 0,
-                    "end_at_step": split_step,
-                    "return_with_leftover_noise": "enable",
+                    "denoise": 1.0,
                     "model": ["4", 0],
                 },
+            },
+            "15": {
+                "class_type": "VAEDecode",
+                "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
             },
             "11": {
                 "class_type": "CheckpointLoaderSimple",
                 "inputs": {"ckpt_name": refiner_ckpt},
+            },
+            "16": {
+                "class_type": "VAEEncode",
+                "inputs": {"pixels": ["15", 0], "vae": ["11", 2]},
             },
             "12": {
                 "class_type": "CLIPTextEncode",
@@ -521,23 +539,23 @@ async def _run_comfyui_bridge(
             },
             "13": {
                 "class_type": "CLIPTextEncode",
-                "inputs": {"clip": ["11", 1], "text": negative_prompt or "blurry, low quality, deformed"},
+                "inputs": {
+                    "clip": ["11", 1],
+                    "text": "oversaturated, red face, glowing nose, clown makeup, blurry, low quality, deformed",
+                },
             },
             "14": {
-                "class_type": "KSamplerAdvanced",
+                "class_type": "KSampler",
                 "inputs": {
-                    "add_noise": "disable",
-                    "noise_seed": seed,
-                    "steps": steps,
-                    "cfg": cfg,
-                    "sampler_name": sampler_name,
-                    "scheduler": scheduler_name,
+                    "seed": seed + 1,
+                    "steps": 14,
+                    "cfg": 5.0,
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
                     "positive": ["12", 0],
                     "negative": ["13", 0],
-                    "latent_image": ["3", 0],
-                    "start_at_step": split_step,
-                    "end_at_step": steps,
-                    "return_with_leftover_noise": "disable",
+                    "latent_image": ["16", 0],
+                    "denoise": 0.36,
                     "model": ["11", 0],
                 },
             },

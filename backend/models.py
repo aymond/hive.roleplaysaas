@@ -172,15 +172,15 @@ class InferenceConfig(BaseModel):
     mps_use_fp16: bool = True
     mps_attention_slicing: bool = True
     comfyui_base_url: str = "http://127.0.0.1:8188"
-    comfyui_checkpoint: str = "CyberRealisticPony_V18.0_F16.safetensors"
+    comfyui_checkpoint: str = "DreamShaperXL_Turbo_v2_1.safetensors"
     comfyui_render_mode: Literal[
         "hybrid_refiner",
         "single_stylized",
         "single_raw",
-    ] = "hybrid_refiner"
+    ] = "single_stylized"
     comfyui_refiner_checkpoint: str = "sd_xl_base_1.0_0.9vae.safetensors"
     comfyui_refiner_switch: float = 0.65
-    comfyui_sampler: str = "dpmpp_2m_sde"
+    comfyui_sampler: str = "dpmpp_2m"
     comfyui_scheduler: str = "karras"
     default_width: int = 512
     default_height: int = 512
