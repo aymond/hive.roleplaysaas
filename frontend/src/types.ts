@@ -141,6 +141,7 @@ export interface WorkflowExecutionResult {
 }
 
 export interface InferenceConfig {
+  log_level?: 'INFO' | 'DEBUG';
   llm_provider: 'auto' | 'ollama' | 'openai_compat' | 'builtin_synth';
   ollama_base_url: string;
   ollama_model: string;

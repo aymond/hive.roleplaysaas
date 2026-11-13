@@ -232,6 +232,28 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
                   className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
+              <div>
+                <label className="block text-xs text-slate-300 mb-1">
+                  Hivemind Terminal Log Level
+                </label>
+                <select
+                  value={draftConfig.log_level || 'INFO'}
+                  onChange={(e) =>
+                    setDraftConfig({
+                      ...draftConfig,
+                      log_level: e.target.value as 'INFO' | 'DEBUG',
+                    })
+                  }
+                  className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-xs text-emerald-300 font-mono"
+                >
+                  <option value="INFO">
+                    INFO (User Actions, Ollama Distillations &amp; ComfyUI Prompts)
+                  </option>
+                  <option value="DEBUG">
+                    DEBUG (+ Full ComfyUI Workflow JSON &amp; Raw LLM Payloads)
+                  </option>
+                </select>
+              </div>
             </div>
           </div>
 

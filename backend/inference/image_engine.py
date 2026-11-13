@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import math
 import platform
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ import httpx
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
+from ..logger import logger
 from ..models import InferenceConfig
 
 try:
@@ -617,14 +620,38 @@ async def _run_comfyui_bridge(
         }
         provider_label = f"comfyui ({ckpt_to_use}, {active_mode})"
 
+    t0 = time.perf_counter()
+    logger.info(
+        "🎨 COMFY→   | POST /prompt | mode=%s | ckpt=%s%s | %dx%d | steps=%d | cfg=%.1f | sampler=%s/%s | seed=%d\n"
+        "                    ├─ Positive: %s\n"
+        "                    └─ Negative: %s",
+        "hybrid_refiner" if use_hybrid else active_mode,
+        ckpt_to_use,
+        f" → {refiner_ckpt}" if use_hybrid else "",
+        width,
+        height,
+        steps,
+        cfg,
+        sampler_name,
+        scheduler_name,
+        seed,
+        prompt,
+        neg_text,
+    )
+    logger.debug("🎨 COMFY→   | Full workflow graph JSON:\n%s", json.dumps(workflow_payload, indent=2))
+
     try:
         async with httpx.AsyncClient(timeout=240.0) as client:
             resp = await client.post(f"{base}/prompt", json={"prompt": workflow_payload})
             if resp.status_code != 200:
+                logger.warning("⚠️ COMFY←   | POST /prompt failed with HTTP %d: %s", resp.status_code, resp.text[:200])
                 return None, ""
             prompt_id = resp.json().get("prompt_id")
             if not prompt_id:
+                logger.warning("⚠️ COMFY←   | POST /prompt returned no prompt_id")
                 return None, ""
+
+            logger.info("⏳ COMFY…   | Queued prompt_id=%s on %s (awaiting completion)", prompt_id, base)
 
             for _ in range(240):
                 await asyncio.sleep(1.0)
@@ -633,6 +660,7 @@ async def _run_comfyui_bridge(
                     hist_data = hist_resp.json()
                     if prompt_id in hist_data:
                         outputs = hist_data[prompt_id].get("outputs", {})
+                        logger.debug("✅ COMFY←   | Raw history outputs for %s: %s", prompt_id, outputs)
                         for node_out in outputs.values():
                             images = node_out.get("images", [])
                             if images:
@@ -646,9 +674,17 @@ async def _run_comfyui_bridge(
                                     },
                                 )
                                 if view_resp.status_code == 200:
+                                    elapsed = time.perf_counter() - t0
+                                    logger.info(
+                                        "✅ COMFY←   | Completed prompt_id=%s in %.2fs | comfy_file=%r (%d KB)",
+                                        prompt_id,
+                                        elapsed,
+                                        img_meta["filename"],
+                                        len(view_resp.content) // 1024,
+                                    )
                                     return view_resp.content, provider_label
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("⚠️ COMFY←   | Exception during ComfyUI bridge: %s", exc)
     return None, ""
 
 

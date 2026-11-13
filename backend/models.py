@@ -158,6 +158,7 @@ class WorkflowExecutionResult(BaseModel):
 
 
 class InferenceConfig(BaseModel):
+    log_level: Literal["INFO", "DEBUG"] = "INFO"
     llm_provider: Literal["auto", "ollama", "openai_compat", "builtin_synth"] = "auto"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "llama3.2:latest"

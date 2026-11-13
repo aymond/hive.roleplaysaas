@@ -25,6 +25,7 @@ from .inference.llm_engine import (
     generate_node_text,
     generate_roleplay_reply,
 )
+from .logger import logger, set_hivemind_log_level
 from .lore_engine import replace_tavern_macros, scan_lorebook
 from .models import (
     CharacterCard,
@@ -60,6 +61,7 @@ app.add_middleware(
 )
 
 storage = StudioStorage()
+set_hivemind_log_level(getattr(storage.config, "log_level", "INFO"))
 
 app.mount(
     "/media/generated",
@@ -150,7 +152,16 @@ async def get_system_status() -> dict[str, Any]:
 @app.put("/api/system/config")
 async def update_system_config(new_config: InferenceConfig) -> dict[str, Any]:
     storage.config = new_config
+    set_hivemind_log_level(new_config.log_level)
     storage.save()
+    logger.info(
+        "▶ ACTION   | update_system_config | llm=%s (%s) | comfy_ckpt=%s | mode=%s | log_level=%s",
+        new_config.llm_provider,
+        new_config.ollama_model,
+        new_config.comfyui_checkpoint,
+        new_config.comfyui_render_mode,
+        new_config.log_level,
+    )
     return {"status": "ok", "config": storage.config.model_dump()}
 
 
@@ -202,6 +213,8 @@ async def generate_character_avatar(char_id: str, seed: int | None = None) -> di
     card = storage.characters.get(char_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
+
+    logger.info("▶ ACTION   | generate_character_avatar(char=%r, id=%s)", card.name, char_id)
 
     world_style = ""
     if card.world_id and card.world_id in storage.worlds:
@@ -453,6 +466,14 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
 
+    logger.info(
+        "▶ ACTION   | send_chat_message(chat=%r, char=%r, illustrate=%s, text=%r)",
+        session.title,
+        card.name,
+        req.illustrate_scene,
+        req.content[:90],
+    )
+
     world = storage.worlds.get(session.world_id) if session.world_id else None
 
     user_msg = ChatMessage(
@@ -549,6 +570,14 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
 
+    logger.info(
+        "▶ ACTION   | swipe_chat_message(chat=%r, char=%r, msg_id=%s, direction=%s)",
+        session.title,
+        card.name,
+        msg_id,
+        req.direction,
+    )
+
     world = storage.worlds.get(session.world_id) if session.world_id else None
 
     if not target_msg.swipes:
@@ -603,6 +632,13 @@ async def illustrate_chat_message(chat_id: str, msg_id: str) -> dict[str, Any]:
 
     card = storage.characters.get(session.character_id)
     world = storage.worlds.get(session.world_id) if session.world_id else None
+
+    logger.info(
+        "▶ ACTION   | illustrate_chat_message(chat=%r, char=%r, msg_id=%s)",
+        session.title,
+        card.name if card else "None",
+        msg_id,
+    )
 
     # Scan surrounding chat turns + character scenario against Lorebook
     msg_idx = session.messages.index(target_msg)
@@ -689,6 +725,7 @@ async def delete_workflow(wf_id: str) -> dict[str, str]:
 
 @app.post("/api/workflows/execute")
 async def execute_workflow(wf: WorkflowGraph) -> dict[str, Any]:
+    logger.info("▶ ACTION   | execute_workflow(name=%r, id=%s, nodes=%d)", wf.name, wf.id, len(wf.nodes))
     # Persist updated graph if it exists
     wf.updated_at = utc_now_iso()
     storage.workflows[wf.id] = wf
@@ -732,6 +769,7 @@ async def list_gallery() -> list[GalleryAsset]:
 
 @app.post("/api/gallery/generate")
 async def generate_direct_gallery_image(req: DirectImageRequest) -> GalleryAsset:
+    logger.info("▶ ACTION   | generate_direct_gallery_image(prompt=%r, %dx%d)", req.prompt[:90], req.width, req.height)
     img_meta = await generate_image_asset(
         config=storage.config,
         output_dir=storage.generated_dir,
@@ -766,6 +804,7 @@ async def delete_gallery_asset(asset_id: str) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="Gallery asset not found")
     storage.gallery.pop(target_idx)
     storage.save()
+    logger.info("▶ ACTION   | delete_gallery_asset(id=%s)", asset_id)
     return {"status": "deleted", "id": asset_id}
 
 
@@ -786,6 +825,15 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
 
     is_pony = "pony" in (storage.config.comfyui_checkpoint or "").lower()
     active_mode = req.render_mode or getattr(storage.config, "comfyui_render_mode", "hybrid_refiner")
+    logger.info(
+        "▶ ACTION   | generate_backstory_grounded_image(char=%r, world=%r, mode=%s, %dx%d, custom_prompt=%r)",
+        card.name if card else "None",
+        world.name if world else "None",
+        active_mode,
+        req.width,
+        req.height,
+        req.custom_prompt[:90],
+    )
     if active_mode == "single_raw":
         quality_prefix = (
             "score_9, score_8_up, score_7_up, masterpiece, photorealistic, 8k, breathtakingly attractive"

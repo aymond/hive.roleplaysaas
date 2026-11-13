@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 import httpx
 from typing import Any
 
+from ..logger import logger
 from ..lore_engine import replace_tavern_macros
 from ..models import CharacterCard, ChatMessage, InferenceConfig, TriggeredLoreInfo
 
@@ -73,6 +75,7 @@ def build_tavern_system_prompt(
 async def _call_ollama_chat(
     config: InferenceConfig,
     messages: list[dict[str, str]],
+    purpose: str = "chat",
 ) -> str | None:
     status = await check_ollama_status(config.ollama_base_url)
     if not status["online"] or not status["models"]:
@@ -88,6 +91,16 @@ async def _call_ollama_chat(
         else:
             hermes_match = next((m for m in available if "hermes" in m.lower()), None)
             model_to_use = hermes_match or available[0]
+    t0 = time.perf_counter()
+    last_user = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+    logger.info(
+        "🤖 OLLAMA→  | purpose=%s | model=%s | temp=%.2f | input=%r",
+        purpose,
+        model_to_use,
+        config.temperature,
+        (last_user[:120] + "...") if len(last_user) > 120 else last_user,
+    )
+    logger.debug("🤖 OLLAMA→  | Full messages payload: %s", messages)
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
@@ -102,13 +115,23 @@ async def _call_ollama_chat(
                     },
                 },
             )
+            elapsed = time.perf_counter() - t0
             if resp.status_code == 200:
                 data = resp.json()
                 content = data.get("message", {}).get("content", "").strip()
                 if content:
+                    logger.info(
+                        "✅ OLLAMA←  | purpose=%s | %.2fs | output=%r",
+                        purpose,
+                        elapsed,
+                        (content[:160] + "...") if len(content) > 160 else content,
+                    )
+                    logger.debug("✅ OLLAMA←  | Full reply: %s", content)
                     return content
-    except Exception:
-        pass
+            else:
+                logger.warning("⚠️ OLLAMA←  | HTTP %d after %.2fs", resp.status_code, elapsed)
+    except Exception as exc:
+        logger.warning("⚠️ OLLAMA←  | Error calling Ollama (%s): %s", purpose, exc)
     return None
 
 
@@ -210,7 +233,7 @@ async def generate_roleplay_reply(
     last_user_msg = next((m.content for m in reversed(history) if m.role == "user"), "Hello.")
 
     if config.llm_provider in ("auto", "ollama"):
-        res = await _call_ollama_chat(config, messages)
+        res = await _call_ollama_chat(config, messages, purpose=f"roleplay_reply({character.name})")
         if res:
             return res, f"ollama ({config.ollama_model})"
 
@@ -242,7 +265,7 @@ async def generate_node_text(
     ]
 
     if config.llm_provider in ("auto", "ollama"):
-        res = await _call_ollama_chat(config, messages)
+        res = await _call_ollama_chat(config, messages, purpose=f"workflow_node({mode})")
         if res:
             return res, f"ollama ({config.ollama_model})"
 
@@ -415,6 +438,7 @@ async def distill_narrative_to_sdxl_keywords(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_payload},
             ],
+            purpose="distill_sdxl_keywords",
         )
         if llm_raw:
             provider_used = f"ollama ({config.ollama_model})"
