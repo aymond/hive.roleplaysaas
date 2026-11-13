@@ -1509,7 +1509,7 @@ async def build_contextual_scene_prompt(
     )
 
     final_tags = dedupe_and_resolve_prompt_conflicts(
-        [quality_prefix, anat_boost, physical_traits, cleaned_harmonized_kw],
+        [quality_prefix, anat_boost, "solo" if not any(m in scene_focus.lower() for m in ("2girls", "two women", "multiple girls", "group", "crowd", "threesome")) else "", physical_traits, cleaned_harmonized_kw],
         scene_text=scene_focus,
     )
     return ", ".join(final_tags)

@@ -524,6 +524,8 @@ async def _run_comfyui_bridge(
     )
     _, _, neg_clothing_blockers = build_anatomical_and_clothing_overrides(prompt)
     neg_text = f"{base_neg}, {neg_clothing_blockers}" if neg_clothing_blockers else base_neg
+    if not any(m in prompt.lower() for m in ("2girls", "3girls", "two women", "multiple girls", "crowd", "group", "threesome")):
+        neg_text = f"{neg_text}, 2girls, multiple girls, two women, duplicate, twins"
     if is_pony_primary and "score_4" not in neg_text:
         neg_text = f"score_4, score_5, score_6, {neg_text}"
 
