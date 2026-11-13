@@ -94,6 +94,8 @@ class ChatMessage(BaseModel):
 class SceneState(BaseModel):
     location: str = ""
     time_and_lighting: str = ""
+    weather: str = ""
+    atmosphere: str = ""
     attire: str = ""
     hairstyle: str = ""
     makeup: str = ""

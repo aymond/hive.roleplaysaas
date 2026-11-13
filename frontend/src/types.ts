@@ -79,6 +79,8 @@ export interface ChatMessage {
 export interface SceneState {
   location: string;
   time_and_lighting: string;
+  weather: string;
+  atmosphere: string;
   attire: string;
   hairstyle: string;
   makeup: string;

@@ -104,6 +104,8 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [sceneStateDraft, setSceneStateDraft] = useState<SceneState>({
     location: '',
     time_and_lighting: '',
+    weather: '',
+    atmosphere: '',
     attire: '',
     hairstyle: '',
     makeup: '',
@@ -146,6 +148,8 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     setSceneStateDraft({
       location: activeSession?.scene_state?.location || '',
       time_and_lighting: activeSession?.scene_state?.time_and_lighting || '',
+      weather: activeSession?.scene_state?.weather || '',
+      atmosphere: activeSession?.scene_state?.atmosphere || '',
       attire: activeSession?.scene_state?.attire || '',
       hairstyle: activeSession?.scene_state?.hairstyle || '',
       makeup: activeSession?.scene_state?.makeup || '',
@@ -1287,15 +1291,30 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
               </p>
               {(
                 [
+                  ['section', 'World & Scenario (Stable)'],
                   ['location', 'Location', 'e.g. Solana Cove beach, candlelit cabana'],
                   ['time_and_lighting', 'Time & Lighting', 'e.g. golden hour sunset, moonlit night'],
+                  ['weather', 'Weather', 'e.g. clear warm breeze, tropical rainstorm'],
+                  ['atmosphere', 'Atmosphere', 'e.g. tranquil resort dusk, intimate secrecy'],
+                  ['section', 'Character Visuals (Turn-by-Turn)'],
                   ['attire', 'Attire / State of Undress', 'e.g. string bikini, completely nude, silk dress'],
                   ['hairstyle', 'Hairstyle', 'e.g. wet slicked-back hair, loose tousled hair'],
                   ['makeup', 'Makeup', 'e.g. natural bare-faced, smoky evening makeup'],
                   ['skin_and_condition', 'Skin & Condition', 'e.g. wet glistening skin, sun-kissed dry skin'],
                   ['pose_and_action', 'Pose & Action', 'e.g. walking away along shoreline'],
                 ] as const
-              ).map(([field, label, placeholder]) => {
+              ).map((entry, idx) => {
+                if (entry[0] === 'section') {
+                  return (
+                    <div
+                      key={`sec_${idx}`}
+                      className="pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/10"
+                    >
+                      {entry[1]}
+                    </div>
+                  );
+                }
+                const [field, label, placeholder] = entry;
                 const isPinned = (sceneStateDraft.pinned_fields || []).includes(field);
                 return (
                   <div

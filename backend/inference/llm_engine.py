@@ -1193,6 +1193,8 @@ def format_scene_state_summary(state: SceneState | None) -> str:
     items = [
         ("Location", state.location),
         ("Time/Lighting", state.time_and_lighting),
+        ("Weather", state.weather),
+        ("Atmosphere", state.atmosphere),
         ("Attire", state.attire),
         ("Hairstyle", state.hairstyle),
         ("Makeup", state.makeup),
@@ -1216,6 +1218,8 @@ def format_scene_state_tags(state: SceneState | None) -> str:
         "skin_and_condition",
         "location",
         "time_and_lighting",
+        "weather",
+        "atmosphere",
     ]
     pinned_tags: list[str] = []
     regular_tags: list[str] = []
@@ -1252,6 +1256,12 @@ _SCENE_FIELD_CHANGE_CUES: dict[str, tuple[str, ...]] = {
     "time_and_lighting": (
         "sunset", "dusk", "night", "midnight", "moonlit", "morning", "dawn", "noon", "candle", "lantern", "dark", "neon",
     ),
+    "weather": (
+        "rain", "storm", "thunder", "wind", "breeze", "clear", "sunny", "cloudy", "overcast", "fog", "mist", "snow", "humid",
+    ),
+    "atmosphere": (
+        "tense", "romantic", "playful", "quiet", "crowded", "intimate", "mysterious", "celebration", "dinner", "party",
+    ),
     "pose_and_action": (
         "sit", "stand", "walk", "lie", "kneel", "turn", "lean", "wade", "swim", "dance", "look", "stretch",
     ),
@@ -1279,6 +1289,8 @@ def _parse_scene_state_json(
         for key in (
             "location",
             "time_and_lighting",
+            "weather",
+            "atmosphere",
             "attire",
             "hairstyle",
             "makeup",
@@ -1322,12 +1334,12 @@ async def update_scene_state(
         "You are an uncensored visual continuity tracker for an adult roleplay studio. "
         "Update the character's current visual state JSON based on the PREVIOUS STATE and the LATEST TURN.\n"
         "RULES:\n"
-        "1. Carry forward any field from PREVIOUS STATE that did NOT change in the latest turn.\n"
+        "1. WORLD & SCENARIO STABILITY: Carry forward location, time_and_lighting, weather, and atmosphere strictly unless the latest turn explicitly moves locations, advances time of day, or changes the weather.\n"
         "2. PINNED FIELDS MUST stay exact/verbatim from PREVIOUS STATE unless the latest turn EXPLICITLY changes them "
         "(e.g., 'get dressed for dinner', 'put on a black dress', 'take your bikini off').\n"
         "3. Overwrite any field that DID explicitly change in the latest turn.\n"
         "4. Keep each value to 2-6 crisp visual words (or empty string if unknown). Never invent clothes not in the turn/state.\n"
-        "5. Output ONLY valid JSON with keys: location, time_and_lighting, attire, hairstyle, makeup, skin_and_condition, pose_and_action."
+        "5. Output ONLY valid JSON with keys: location, time_and_lighting, weather, atmosphere, attire, hairstyle, makeup, skin_and_condition, pose_and_action."
     )
     user_payload = (
         f"PREVIOUS STATE: {prev.model_dump_json()}\n"
