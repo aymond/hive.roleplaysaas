@@ -173,17 +173,28 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     setInputMessage('');
     setPendingUserText(text);
     setSending(true);
+    const shouldAutoIllustrate = autoIllustrate;
+    let newAssistantMsgId: string | null = null;
     try {
-      const res = await api.sendMessage(activeSession.id, text, autoIllustrate);
+      // Always fetch the text reply first without blocking on image generation
+      const res = await api.sendMessage(activeSession.id, text, false);
       setLastProvider(res.provider);
       const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
       onChatsUpdated(nextChats);
-      if (autoIllustrate) {
-        onGalleryUpdated();
+      if (shouldAutoIllustrate) {
+        const lastAssistant = [...res.session.messages]
+          .reverse()
+          .find((m) => m.role === 'assistant');
+        newAssistantMsgId = lastAssistant?.id || null;
       }
     } finally {
       setSending(false);
       setPendingUserText(null);
+    }
+
+    if (newAssistantMsgId) {
+      // Run image generation asynchronously so the user can read the reply immediately
+      void handleIllustrateTurn(newAssistantMsgId);
     }
   };
 
