@@ -116,10 +116,11 @@ class BackstoryImageRequest(BaseModel):
     include_world_lore: bool = True
     use_llm_director: bool = True
     render_mode: str | None = None
-    width: int = 512
-    height: int = 512
+    face_detailer: bool | None = None
+    width: int = 768
+    height: int = 1024
     steps: int = 20
-    cfg: float = 7.0
+    cfg: float = 6.0
     seed: int | None = None
 
 
@@ -930,6 +931,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         cfg=req.cfg,
         seed=req.seed,
         render_mode_override=active_mode,
+        face_detailer_override=req.face_detailer,
     )
 
     asset = GalleryAsset(

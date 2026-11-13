@@ -411,6 +411,68 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
               </div>
             </div>
 
+            {/* Final Face Detailer Pass (ADetailer-style MediaPipe 768x768 Crop & Refine) */}
+            <div className="p-3 rounded-xl bg-[#131825] border border-emerald-500/25 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-emerald-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draftConfig.comfyui_face_detailer_enabled ?? true}
+                    onChange={(e) =>
+                      setDraftConfig({
+                        ...draftConfig,
+                        comfyui_face_detailer_enabled: e.target.checked,
+                      })
+                    }
+                  />
+                  <span>Automatic Final Face Detailer Pass (MediaPipe 768×768 Crop &amp; Refine)</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] text-slate-300 mb-1">
+                    Face Pass Checkpoint
+                  </label>
+                  <select
+                    value={draftConfig.comfyui_face_detailer_model || 'same'}
+                    onChange={(e) =>
+                      setDraftConfig({
+                        ...draftConfig,
+                        comfyui_face_detailer_model: e.target.value,
+                      })
+                    }
+                    className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-emerald-200 font-mono"
+                  >
+                    <option value="same">same (Fastest — Reuses Active Model in VRAM, +3.5s)</option>
+                    {(status.providers.comfyui.checkpoints || []).map((ckpt) => (
+                      <option key={ckpt} value={ckpt}>
+                        {ckpt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] text-slate-300 mb-1">
+                    Face Pass Denoise Strength ({(draftConfig.comfyui_face_detailer_denoise ?? 0.36).toFixed(2)})
+                  </label>
+                  <input
+                    type="range"
+                    min={0.2}
+                    max={0.55}
+                    step={0.02}
+                    value={draftConfig.comfyui_face_detailer_denoise ?? 0.36}
+                    onChange={(e) =>
+                      setDraftConfig({
+                        ...draftConfig,
+                        comfyui_face_detailer_denoise: Number(e.target.value),
+                      })
+                    }
+                    className="w-full accent-emerald-400"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center gap-4 pt-1">
               <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
                 <input

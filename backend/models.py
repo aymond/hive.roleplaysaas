@@ -181,12 +181,15 @@ class InferenceConfig(BaseModel):
     ] = "single_stylized"
     comfyui_refiner_checkpoint: str = "sd_xl_base_1.0_0.9vae.safetensors"
     comfyui_refiner_switch: float = 0.65
+    comfyui_face_detailer_enabled: bool = True
+    comfyui_face_detailer_model: str = "same"
+    comfyui_face_detailer_denoise: float = 0.36
     comfyui_sampler: str = "dpmpp_2m"
     comfyui_scheduler: str = "karras"
-    default_width: int = 512
-    default_height: int = 512
+    default_width: int = 768
+    default_height: int = 1024
     default_steps: int = 20
-    default_cfg: float = 7.0
+    default_cfg: float = 6.0
 
 
 class GalleryAsset(BaseModel):

@@ -101,7 +101,10 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [renderMode, setRenderMode] = useState<
     'hybrid_refiner' | 'single_stylized' | 'single_raw'
   >('single_stylized');
-  const [aspectRatio, setAspectRatio] = useState<'512x512' | '512x768' | '768x512'>('512x768');
+  const [faceDetailer, setFaceDetailer] = useState(true);
+  const [aspectRatio, setAspectRatio] = useState<
+    '768x1024' | '512x768' | '768x768' | '1024x768' | '512x512' | '768x512'
+  >('768x1024');
   const [generatingBackstoryImg, setGeneratingBackstoryImg] = useState(false);
   const [lastBackstoryPromptUsed, setLastBackstoryPromptUsed] = useState<string | null>(null);
 
@@ -221,6 +224,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
         include_world_lore: includeWorldLore,
         use_llm_director: useLlmDirector,
         render_mode: renderMode,
+        face_detailer: faceDetailer,
         width: w,
         height: h,
       });
@@ -801,6 +805,17 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                   <span>Distill Scenario &amp; Scene into SDXL Keywords via Ollama (hermes3:8b)</span>
                 </label>
 
+                <label className="flex items-center gap-2 text-[11px] text-emerald-300 cursor-pointer pt-0.5 border-t border-white/5">
+                  <input
+                    type="checkbox"
+                    checked={faceDetailer}
+                    onChange={(e) => setFaceDetailer(e.target.checked)}
+                  />
+                  <span>
+                    ✨ Automatic Face Detailer Pass (MediaPipe 768×768 Face Crop &amp; Refine)
+                  </span>
+                </label>
+
                 <div className="pt-1.5 border-t border-white/5">
                   <label className="block text-[10px] font-semibold uppercase tracking-wider text-amber-300 mb-1">
                     Artistic Render Pipeline (Experiment Mode)
@@ -834,14 +849,25 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                   aria-label="Backstory Image Aspect Ratio"
                   value={aspectRatio}
                   onChange={(e) =>
-                    setAspectRatio(e.target.value as '512x512' | '512x768' | '768x512')
+                    setAspectRatio(
+                      e.target.value as
+                        | '768x1024'
+                        | '512x768'
+                        | '768x768'
+                        | '1024x768'
+                        | '512x512'
+                        | '768x512'
+                    )
                   }
                   disabled={generatingBackstoryImg}
                   className="bg-[#0b0e17] border border-white/15 rounded-xl px-2.5 py-2 text-xs text-slate-200"
                 >
-                  <option value="512x512">512×512 Square</option>
-                  <option value="512x768">512×768 Portrait</option>
-                  <option value="768x512">768×512 Cinema</option>
+                  <option value="768x1024">768×1024 HD Portrait</option>
+                  <option value="512x768">512×768 Fast Portrait</option>
+                  <option value="768x768">768×768 HD Square</option>
+                  <option value="1024x768">1024×768 HD Cinema</option>
+                  <option value="512x512">512×512 Fast Square</option>
+                  <option value="768x512">768×512 Fast Cinema</option>
                 </select>
 
                 <button

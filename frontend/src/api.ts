@@ -187,6 +187,7 @@ export const api = {
     include_world_lore?: boolean;
     use_llm_director?: boolean;
     render_mode?: 'hybrid_refiner' | 'single_stylized' | 'single_raw';
+    face_detailer?: boolean;
     width?: number;
     height?: number;
     steps?: number;

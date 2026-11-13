@@ -160,6 +160,9 @@ export interface InferenceConfig {
   comfyui_render_mode?: 'hybrid_refiner' | 'single_stylized' | 'single_raw';
   comfyui_refiner_checkpoint?: string;
   comfyui_refiner_switch?: number;
+  comfyui_face_detailer_enabled?: boolean;
+  comfyui_face_detailer_model?: string;
+  comfyui_face_detailer_denoise?: number;
   comfyui_sampler?: string;
   comfyui_scheduler?: string;
   default_width: number;

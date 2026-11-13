@@ -512,6 +512,98 @@ def build_anatomical_and_clothing_overrides(
     return ", ".join(pos_boosts), cleaned_kw, dedup_neg
 
 
+def build_face_detailer_prompt(base_prompt: str, is_pony: bool = True) -> tuple[str, str]:
+    """
+    Builds a dedicated (positive_face_prompt, negative_face_prompt) for the 768x768 ADetailer
+    face crop pass. Keeps facial/hair/eye/lighting descriptors from base_prompt while stripping
+    full-body, torso, and lower-body tags so the face pass focuses 100% on facial symmetry and eyes.
+    """
+    body_and_wide_terms = (
+        "full body",
+        "cowboy shot",
+        "lower body",
+        "spread legs",
+        "open thighs",
+        "pussy",
+        "vulva",
+        "labia",
+        "cleft of venus",
+        "clit",
+        "bare breasts",
+        "exposed breasts",
+        "nipples",
+        "areola",
+        "topless",
+        "waist-deep",
+        "standing",
+        "walking",
+        "lying",
+        "kneeling",
+        "sitting",
+        "legs",
+        "thighs",
+        "hips",
+        "waist",
+        "feet",
+        "barefoot",
+    )
+
+    kept_traits: list[str] = []
+    for raw_seg in base_prompt.split(","):
+        seg = raw_seg.strip(" ()")
+        seg_l = seg.lower()
+        if not seg or seg_l.startswith("score_"):
+            continue
+        if any(term in seg_l for term in body_and_wide_terms):
+            continue
+        if any(
+            face_kw in seg_l
+            for face_kw in (
+                "face",
+                "eye",
+                "hair",
+                "lips",
+                "smile",
+                "gaze",
+                "cheek",
+                "skin",
+                "kunis",
+                "jovovich",
+                "resemblance",
+                "woman",
+                "chronomancer",
+                "queen",
+                "sun-kissed",
+                "golden hour",
+                "sunset",
+                "lighting",
+                "glamour",
+                "painterly",
+            )
+        ):
+            # Remove weight suffixes like :1.35 if present
+            clean_seg = re.sub(r":\d+(\.\d+)?", "", seg).strip()
+            if clean_seg and clean_seg not in kept_traits:
+                kept_traits.append(clean_seg)
+
+    prefix = "score_9, score_8_up, score_7_up, masterpiece" if is_pony else "masterpiece, 8k"
+    face_core = (
+        "(closeup portrait of face:1.2), (detailed symmetrical eyes, sharp circular iris and pupils, "
+        "natural eye catchlights:1.3), breathtakingly beautiful face, natural skin texture, "
+        "soft detailed lips, subtle warm expression"
+    )
+    traits_str = ", ".join(kept_traits[:10])
+    pos_face = ", ".join(p for p in (prefix, face_core, traits_str) if p)
+
+    neg_prefix = "score_4, score_5, score_6, " if is_pony else ""
+    neg_face = (
+        f"{neg_prefix}asymmetric eyes, cross-eyed, strabismus, deformed pupils, irregular iris, "
+        "blurry face, melted face, red nose, glowing nose, clown makeup, oversaturated skin, "
+        "extra eyes, multiple faces, full body, torso, breasts, bad anatomy, deformed, watermark"
+    )
+    return pos_face, neg_face
+
+
 _PROSE_STOPWORDS = {
     "the", "and", "for", "that", "this", "with", "from", "your", "have", "are", "was", "were",
     "into", "over", "under", "where", "when", "while", "after", "before", "about", "between",

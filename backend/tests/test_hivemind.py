@@ -7,6 +7,7 @@ from backend.inference.image_engine import _render_procedural_artwork, get_apple
 from backend.inference.llm_engine import (
     build_anatomical_and_clothing_overrides,
     build_contextual_scene_prompt,
+    build_face_detailer_prompt,
     clean_character_visual_tags_for_scene,
     distill_narrative_to_sdxl_keywords,
     extract_action_and_scene_beats,
@@ -248,6 +249,19 @@ def test_contextual_scene_prompt_extraction() -> None:
     assert "sunset waves" in cleaned_kw
     assert "bikini" in neg_block
     assert "covered pussy" in neg_block
+
+    # Verify face detailer prompt keeps facial/eye/hair traits and strips full-body/anatomical tags
+    pos_face, neg_face = build_face_detailer_prompt(
+        "score_9, score_8_up, (bare breasts, nipples:1.35), (pussy, spread legs, full body:1.4), "
+        "Mila Kunis and Milla Jovovich resemblance, expressive dark eyes, warm sunset rim lighting",
+        is_pony=True,
+    )
+    assert "detailed symmetrical eyes" in pos_face
+    assert "Mila Kunis" in pos_face
+    assert "expressive dark eyes" in pos_face
+    assert "spread legs" not in pos_face
+    assert "bare breasts" not in pos_face
+    assert "asymmetric eyes" in neg_face
 
 
 

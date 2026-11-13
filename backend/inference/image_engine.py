@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import io
 import json
@@ -17,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from ..logger import logger
 from ..models import InferenceConfig
-from .llm_engine import build_anatomical_and_clothing_overrides
+from .llm_engine import build_anatomical_and_clothing_overrides, build_face_detailer_prompt
 
 try:
     import torch
@@ -59,6 +60,7 @@ async def check_comfyui_status(base_url: str) -> dict[str, Any]:
                 if resp.status_code == 200:
                     stats = resp.json()
                     checkpoints: list[str] = []
+                    face_detectors: list[str] = []
                     try:
                         ckpt_resp = await client.get(f"{url}/object_info/CheckpointLoaderSimple")
                         if ckpt_resp.status_code == 200:
@@ -73,15 +75,34 @@ async def check_comfyui_status(base_url: str) -> dict[str, Any]:
                                 checkpoints = [str(c) for c in raw_list]
                     except Exception:
                         pass
+                    try:
+                        mp_resp = await client.get(f"{url}/object_info/LoadMediaPipeFaceLandmarker")
+                        if mp_resp.status_code == 200:
+                            mp_data = mp_resp.json()
+                            mp_input = (
+                                mp_data.get("LoadMediaPipeFaceLandmarker", {})
+                                .get("input", {})
+                                .get("required", {})
+                                .get("model_name", [])
+                            )
+                            if len(mp_input) >= 2 and isinstance(mp_input[1], dict):
+                                opts = mp_input[1].get("options", [])
+                                if isinstance(opts, list):
+                                    face_detectors = [str(o) for o in opts]
+                            elif len(mp_input) >= 1 and isinstance(mp_input[0], list):
+                                face_detectors = [str(o) for o in mp_input[0]]
+                    except Exception:
+                        pass
                     return {
                         "online": True,
                         "active_url": url,
                         "checkpoints": checkpoints,
+                        "face_detectors": face_detectors,
                         "stats": stats,
                     }
             except Exception:
                 continue
-    return {"online": False, "active_url": base_url, "checkpoints": [], "stats": {}}
+    return {"online": False, "active_url": base_url, "checkpoints": [], "face_detectors": [], "stats": {}}
 
 
 def _render_procedural_artwork(
@@ -408,6 +429,240 @@ def _run_mps_diffusers_sync(
         return None
 
 
+async def _fetch_comfy_node_image_bytes(
+    client: httpx.AsyncClient,
+    base: str,
+    outputs: dict[str, Any],
+    preferred_node_id: str,
+) -> tuple[bytes | None, str]:
+    """Fetches PNG bytes for a specific SaveImage node output (or falls back to first available)."""
+    node_out = outputs.get(preferred_node_id)
+    if not node_out:
+        return None, ""
+    images = node_out.get("images", [])
+    if not images:
+        return None, ""
+    img_meta = images[0]
+    view_resp = await client.get(
+        f"{base}/view",
+        params={
+            "filename": img_meta["filename"],
+            "subfolder": img_meta.get("subfolder", ""),
+            "type": img_meta.get("type", "output"),
+        },
+    )
+    if view_resp.status_code == 200:
+        return view_resp.content, str(img_meta["filename"])
+    return None, ""
+
+
+async def _run_comfyui_face_detailer_pass(
+    client: httpx.AsyncClient,
+    base: str,
+    config: InferenceConfig,
+    base_img_bytes: bytes,
+    mask_img_bytes: bytes | None,
+    base_prompt: str,
+    primary_ckpt: str,
+    available_ckpts: list[str],
+    seed: int,
+) -> tuple[bytes, bool]:
+    """
+    ADetailer-style Final Face Pass:
+    1. Reads the MediaPipe 468-landmark face oval mask from Pass 1.
+    2. Crops a square context window (2.2x face bbox) around the detected face and upscales to 768x768.
+    3. Dilates and Gaussian-feathers the face oval mask (with a 32px zero-mask border so crop edges never seam).
+    4. Runs a 10-step masked KSampler pass (ETN_LoadImageBase64 + ETN_LoadMaskBase64 + SetLatentNoiseMask)
+       at denoise=0.36 focused exclusively on facial symmetry, detailed irises/pupils, and natural skin texture.
+    5. Downscales with Lanczos and composites onto the original image via the feathered face oval mask.
+    """
+    if not mask_img_bytes:
+        return base_img_bytes, False
+
+    try:
+        base_img = Image.open(io.BytesIO(base_img_bytes)).convert("RGB")
+        mask_img = Image.open(io.BytesIO(mask_img_bytes)).convert("L")
+        img_w, img_h = base_img.size
+        if mask_img.size != (img_w, img_h):
+            mask_img = mask_img.resize((img_w, img_h), Image.Resampling.BILINEAR)
+
+        mask_np = np.asarray(mask_img)
+        ys, xs = np.where(mask_np > 32)
+        if len(xs) < 25 or len(ys) < 25:
+            logger.info("👤 FACE⏭   | MediaPipe detected no visible face oval — skipping Face Detailer pass")
+            return base_img_bytes, False
+
+        fx1, fx2 = int(xs.min()), int(xs.max())
+        fy1, fy2 = int(ys.min()), int(ys.max())
+        fw, fh = max(1, fx2 - fx1), max(1, fy2 - fy1)
+        face_cx = (fx1 + fx2) // 2
+        face_cy = (fy1 + fy2) // 2
+
+        # Compute square context window around the face (2.3x face oval size so hair, jawline, and lighting are in context)
+        crop_side = int(max(fw, fh) * 2.3)
+        crop_side = max(min(160, img_w, img_h), min(crop_side, min(img_w, img_h)))
+
+        cx1 = max(0, min(img_w - crop_side, face_cx - crop_side // 2))
+        cy1 = max(0, min(img_h - crop_side, face_cy - crop_side // 2))
+        cx2 = cx1 + crop_side
+        cy2 = cy1 + crop_side
+
+        target_res = 768
+        face_crop_768 = base_img.crop((cx1, cy1, cx2, cy2)).resize(
+            (target_res, target_res), Image.Resampling.LANCZOS
+        )
+        mask_crop_768 = mask_img.crop((cx1, cy1, cx2, cy2)).resize(
+            (target_res, target_res), Image.Resampling.BILINEAR
+        )
+
+        # Slightly expand the face oval so eyebrows, eyelashes, and jaw contours are included,
+        # clamp a 36px outer border to 0 so the crop boundary never shows a seam, then Gaussian-feather
+        expanded_mask = mask_crop_768.filter(ImageFilter.MaxFilter(19))
+        border_draw = ImageDraw.Draw(expanded_mask)
+        border_draw.rectangle([0, 0, target_res - 1, target_res - 1], outline=0, width=36)
+        feathered_mask_768 = expanded_mask.filter(ImageFilter.GaussianBlur(radius=24))
+
+        crop_buf = io.BytesIO()
+        face_crop_768.save(crop_buf, format="PNG")
+        crop_b64 = base64.b64encode(crop_buf.getvalue()).decode("ascii")
+
+        mask_buf = io.BytesIO()
+        feathered_mask_768.save(mask_buf, format="PNG")
+        mask_b64 = base64.b64encode(mask_buf.getvalue()).decode("ascii")
+
+        # Determine which checkpoint to use for the Face Pass ("same" keeps the primary checkpoint hot in VRAM)
+        face_model_cfg = getattr(config, "comfyui_face_detailer_model", "same") or "same"
+        face_ckpt = primary_ckpt
+        if face_model_cfg != "same" and (not available_ckpts or face_model_cfg in available_ckpts):
+            face_ckpt = face_model_cfg
+
+        is_pony_face = "pony" in face_ckpt.lower()
+        is_turbo_face = any(k in face_ckpt.lower() for k in ("turbo", "lightning", "hyper"))
+        pos_face_prompt, neg_face_prompt = build_face_detailer_prompt(base_prompt, is_pony=is_pony_face)
+
+        face_denoise = float(getattr(config, "comfyui_face_detailer_denoise", 0.36) or 0.36)
+        face_steps = 6 if is_turbo_face else 10
+        face_cfg = 2.0 if is_turbo_face else 5.0
+        face_sampler = "dpmpp_sde" if is_turbo_face else "dpmpp_2m"
+
+        face_workflow: dict[str, Any] = {
+            "1": {
+                "class_type": "CheckpointLoaderSimple",
+                "inputs": {"ckpt_name": face_ckpt},
+            },
+            "2": {
+                "class_type": "CLIPSetLastLayer",
+                "inputs": {"clip": ["1", 1], "stop_at_clip_layer": -2 if is_pony_face else -1},
+            },
+            "3": {
+                "class_type": "ETN_LoadImageBase64",
+                "inputs": {"image": crop_b64},
+            },
+            "4": {
+                "class_type": "ETN_LoadMaskBase64",
+                "inputs": {"mask": mask_b64},
+            },
+            "5": {
+                "class_type": "VAEEncode",
+                "inputs": {"pixels": ["3", 0], "vae": ["1", 2]},
+            },
+            "6": {
+                "class_type": "SetLatentNoiseMask",
+                "inputs": {"samples": ["5", 0], "mask": ["4", 0]},
+            },
+            "7": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"clip": ["2", 0], "text": pos_face_prompt},
+            },
+            "8": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"clip": ["2", 0], "text": neg_face_prompt},
+            },
+            "9": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "model": ["1", 0],
+                    "seed": seed + 77,
+                    "steps": face_steps,
+                    "cfg": face_cfg,
+                    "sampler_name": face_sampler,
+                    "scheduler": "karras",
+                    "positive": ["7", 0],
+                    "negative": ["8", 0],
+                    "latent_image": ["6", 0],
+                    "denoise": face_denoise,
+                },
+            },
+            "10": {
+                "class_type": "VAEDecode",
+                "inputs": {"samples": ["9", 0], "vae": ["1", 2]},
+            },
+            "11": {
+                "class_type": "SaveImage",
+                "inputs": {"filename_prefix": "Hivemind_FaceDetail", "images": ["10", 0]},
+            },
+        }
+
+        t_face = time.perf_counter()
+        logger.info(
+            "👤 FACE→    | ADetailer 768x768 Face Pass | face_bbox=(%d,%d %dx%d) → crop=(%d,%d %dx%d) | ckpt=%s | steps=%d | denoise=%.2f\n"
+            "                    └─ Face Prompt: %s",
+            fx1,
+            fy1,
+            fw,
+            fh,
+            cx1,
+            cy1,
+            crop_side,
+            crop_side,
+            face_ckpt,
+            face_steps,
+            face_denoise,
+            pos_face_prompt,
+        )
+
+        resp = await client.post(f"{base}/prompt", json={"prompt": face_workflow})
+        if resp.status_code != 200:
+            logger.warning("⚠️ FACE←    | Face pass POST /prompt failed (%d): %s", resp.status_code, resp.text[:160])
+            return base_img_bytes, False
+
+        face_prompt_id = resp.json().get("prompt_id")
+        if not face_prompt_id:
+            return base_img_bytes, False
+
+        for _ in range(120):
+            await asyncio.sleep(0.5)
+            hist_resp = await client.get(f"{base}/history/{face_prompt_id}")
+            if hist_resp.status_code == 200:
+                hist_data = hist_resp.json()
+                if face_prompt_id in hist_data:
+                    outputs = hist_data[face_prompt_id].get("outputs", {})
+                    refined_bytes, refined_fname = await _fetch_comfy_node_image_bytes(
+                        client, base, outputs, "11"
+                    )
+                    if refined_bytes:
+                        refined_768 = Image.open(io.BytesIO(refined_bytes)).convert("RGB")
+                        refined_small = refined_768.resize((crop_side, crop_side), Image.Resampling.LANCZOS)
+                        alpha_small = feathered_mask_768.resize((crop_side, crop_side), Image.Resampling.LANCZOS)
+                        orig_crop = base_img.crop((cx1, cy1, cx2, cy2))
+                        blended_crop = Image.composite(refined_small, orig_crop, alpha_small)
+                        base_img.paste(blended_crop, (cx1, cy1))
+
+                        out_buf = io.BytesIO()
+                        base_img.save(out_buf, format="PNG")
+                        logger.info(
+                            "✅ FACE←    | Completed 768x768 Face Detailer in %.2fs | comfy_file=%r",
+                            time.perf_counter() - t_face,
+                            refined_fname,
+                        )
+                        return out_buf.getvalue(), True
+                    break
+    except Exception as exc:
+        logger.warning("⚠️ FACE←    | Exception during Face Detailer pass (returning Pass 1 image): %s", exc)
+
+    return base_img_bytes, False
+
+
 async def _run_comfyui_bridge(
     config: InferenceConfig,
     prompt: str,
@@ -418,6 +673,7 @@ async def _run_comfyui_bridge(
     cfg: float,
     seed: int,
     render_mode_override: str | None = None,
+    face_detailer_override: bool | None = None,
 ) -> tuple[bytes | None, str]:
     status = await check_comfyui_status(config.comfyui_base_url)
     if not status["online"]:
@@ -425,6 +681,7 @@ async def _run_comfyui_bridge(
 
     base = status.get("active_url", config.comfyui_base_url).rstrip("/")
     available_ckpts: list[str] = status.get("checkpoints", [])
+    face_detectors: list[str] = status.get("face_detectors", [])
     ckpt_to_use = config.comfyui_checkpoint
     if available_ckpts and ckpt_to_use not in available_ckpts:
         matched = next(
@@ -625,14 +882,54 @@ async def _run_comfyui_bridge(
         }
         provider_label = f"comfyui ({ckpt_to_use}, {active_mode})"
 
+    want_face_detailer = (
+        face_detailer_override
+        if face_detailer_override is not None
+        else getattr(config, "comfyui_face_detailer_enabled", True)
+    )
+    face_detector_model = face_detectors[0] if (want_face_detailer and face_detectors) else None
+
+    if face_detector_model:
+        workflow_payload["20"] = {
+            "class_type": "LoadMediaPipeFaceLandmarker",
+            "inputs": {"model_name": face_detector_model},
+        }
+        workflow_payload["21"] = {
+            "class_type": "MediaPipeFaceLandmarker",
+            "inputs": {
+                "face_detection_model": ["20", 0],
+                "image": ["8", 0],
+                "detector_variant": "both",
+                "num_faces": 1,
+                "min_confidence": 0.30,
+                "missing_frame_fallback": "empty",
+            },
+        }
+        workflow_payload["22"] = {
+            "class_type": "MediaPipeFaceMask",
+            "inputs": {
+                "face_landmarks": ["21", 0],
+                "regions": "all",
+            },
+        }
+        workflow_payload["23"] = {
+            "class_type": "MaskToImage",
+            "inputs": {"mask": ["22", 0]},
+        }
+        workflow_payload["24"] = {
+            "class_type": "SaveImage",
+            "inputs": {"filename_prefix": "Hivemind_FaceMask", "images": ["23", 0]},
+        }
+
     t0 = time.perf_counter()
     logger.info(
-        "🎨 COMFY→   | POST /prompt | mode=%s | ckpt=%s%s | %dx%d | steps=%d | cfg=%.1f | sampler=%s/%s | seed=%d\n"
+        "🎨 COMFY→   | POST /prompt | mode=%s | ckpt=%s%s | face_detailer=%s | %dx%d | steps=%d | cfg=%.1f | sampler=%s/%s | seed=%d\n"
         "                    ├─ Positive: %s\n"
         "                    └─ Negative: %s",
         "hybrid_refiner" if use_hybrid else active_mode,
         ckpt_to_use,
         f" → {refiner_ckpt}" if use_hybrid else "",
+        "ON" if face_detector_model else "OFF",
         width,
         height,
         steps,
@@ -666,28 +963,42 @@ async def _run_comfyui_bridge(
                     if prompt_id in hist_data:
                         outputs = hist_data[prompt_id].get("outputs", {})
                         logger.debug("✅ COMFY←   | Raw history outputs for %s: %s", prompt_id, outputs)
-                        for node_out in outputs.values():
-                            images = node_out.get("images", [])
-                            if images:
-                                img_meta = images[0]
-                                view_resp = await client.get(
-                                    f"{base}/view",
-                                    params={
-                                        "filename": img_meta["filename"],
-                                        "subfolder": img_meta.get("subfolder", ""),
-                                        "type": img_meta.get("type", "output"),
-                                    },
-                                )
-                                if view_resp.status_code == 200:
-                                    elapsed = time.perf_counter() - t0
-                                    logger.info(
-                                        "✅ COMFY←   | Completed prompt_id=%s in %.2fs | comfy_file=%r (%d KB)",
-                                        prompt_id,
-                                        elapsed,
-                                        img_meta["filename"],
-                                        len(view_resp.content) // 1024,
+                        base_bytes, base_fname = await _fetch_comfy_node_image_bytes(client, base, outputs, "9")
+                        if not base_bytes:
+                            # Fallback if node ID wasn't "9"
+                            for node_id in outputs:
+                                if node_id != "24":
+                                    base_bytes, base_fname = await _fetch_comfy_node_image_bytes(
+                                        client, base, outputs, node_id
                                     )
-                                    return view_resp.content, provider_label
+                                    if base_bytes:
+                                        break
+                        if base_bytes:
+                            elapsed = time.perf_counter() - t0
+                            logger.info(
+                                "✅ COMFY←   | Completed Pass 1 prompt_id=%s in %.2fs | comfy_file=%r (%d KB)",
+                                prompt_id,
+                                elapsed,
+                                base_fname,
+                                len(base_bytes) // 1024,
+                            )
+                            if face_detector_model and "24" in outputs:
+                                mask_bytes, _ = await _fetch_comfy_node_image_bytes(client, base, outputs, "24")
+                                final_bytes, face_refined = await _run_comfyui_face_detailer_pass(
+                                    client=client,
+                                    base=base,
+                                    config=config,
+                                    base_img_bytes=base_bytes,
+                                    mask_img_bytes=mask_bytes,
+                                    base_prompt=prompt,
+                                    primary_ckpt=ckpt_to_use,
+                                    available_ckpts=available_ckpts,
+                                    seed=seed,
+                                )
+                                if face_refined:
+                                    provider_label = f"{provider_label} + FaceDetailer"
+                                return final_bytes, provider_label
+                            return base_bytes, provider_label
     except Exception as exc:
         logger.warning("⚠️ COMFY←   | Exception during ComfyUI bridge: %s", exc)
     return None, ""
@@ -704,6 +1015,7 @@ async def generate_image_asset(
     cfg: float | None = None,
     seed: int | None = None,
     render_mode_override: str | None = None,
+    face_detailer_override: bool | None = None,
 ) -> dict[str, Any]:
     """
     Generates an image using the configured Apple Silicon Image Engine, writes it to output_dir,
@@ -730,6 +1042,7 @@ async def generate_image_asset(
             cfg=guidance,
             seed=actual_seed,
             render_mode_override=render_mode_override,
+            face_detailer_override=face_detailer_override,
         )
         if img_bytes:
             provider_used = comfy_label or f"comfyui ({config.comfyui_checkpoint})"
