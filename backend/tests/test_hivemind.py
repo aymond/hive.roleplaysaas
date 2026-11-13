@@ -501,6 +501,41 @@ def test_scene_state_condenses_bloated_pose_and_action(monkeypatch) -> None:
     assert "..." not in updated.pose_and_action
 
 
+def test_scene_state_injected_directly_into_scene_prompt(monkeypatch) -> None:
+    # Even if the LLM harmonizer ignores scene_state, build_contextual_scene_prompt must inject it directly.
+    async def fake_harmonize(**kwargs):
+        return "cinematic lighting, soft painterly glow", "mock"
+
+    monkeypatch.setattr("backend.inference.llm_engine.harmonize_sdxl_prompt", fake_harmonize)
+
+    char = CharacterCard(name="Liamching", visual_prompt_tags="1girl, stunning asian woman")
+    msg = ChatMessage(role="assistant", sender_name="Liamching", content="*She glances back.*")
+    state = SceneState(
+        location="lantern-lit boardwalk",
+        weather="warm ocean breeze",
+        attire="sleek black jumpsuit",
+        pose_and_action="walking gracefully along boardwalk",
+        pinned_fields=["attire"],
+    )
+    prompt = asyncio.run(
+        build_contextual_scene_prompt(
+            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors"),
+            char,
+            [msg],
+            msg,
+            scene_state=state,
+        )
+    )
+    assert "(sleek black jumpsuit:1.2)" in prompt
+    assert "walking gracefully along boardwalk" in prompt
+    assert "lantern-lit boardwalk" in prompt
+    assert "warm ocean breeze" in prompt
+    assert "solo" in prompt
+    # Pinned attire must appear BEFORE the trailing style tags
+    assert prompt.index("sleek black jumpsuit") < prompt.index("cinematic lighting")
+
+
+
 
 
 

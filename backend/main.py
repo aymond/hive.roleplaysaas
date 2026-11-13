@@ -24,6 +24,7 @@ from .inference.llm_engine import (
     distill_narrative_to_sdxl_keywords,
     distill_situation_checkpoint,
     fallback_extract_sdxl_keywords,
+    format_scene_state_tags,
     generate_roleplay_reply,
     harmonize_sdxl_prompt,
     update_scene_state,
@@ -1014,13 +1015,20 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
     else:
         harmonized_kw = ", ".join(p for p in (req.custom_prompt.strip(), style_suffix) if p)
 
-    scene_focus = f"{req.custom_prompt} {scenario_to_distill}"
+    session_state_tags = ""
+    if req.chat_id and req.chat_id in storage.chats:
+        chat_sess = storage.chats[req.chat_id]
+        session_state_tags = format_scene_state_tags(chat_sess.scene_state)
+
+    scene_focus = f"{req.custom_prompt} {scenario_to_distill} {session_state_tags}"
     anat_boost, cleaned_harmonized_kw, _ = build_anatomical_and_clothing_overrides(
         scene_text=scene_focus,
         distilled_keywords=harmonized_kw,
     )
     if anat_boost:
         prompt_segments.append(anat_boost)
+    if session_state_tags:
+        prompt_segments.append(session_state_tags)
     if char_traits:
         prompt_segments.append(char_traits)
     if cleaned_harmonized_kw:

@@ -1543,12 +1543,17 @@ async def build_contextual_scene_prompt(
 
     scene_focus = f"{user_intent} {char_actions or target_msg.content}"
     anat_boost, cleaned_harmonized_kw, _ = build_anatomical_and_clothing_overrides(
-        scene_text=scene_focus,
+        scene_text=f"{scene_focus} {state_tags}",
         distilled_keywords=harmonized_tags,
     )
 
+    solo_tag = (
+        "solo"
+        if not any(m in scene_focus.lower() for m in ("2girls", "two women", "multiple girls", "group", "crowd", "threesome"))
+        else ""
+    )
     final_tags = dedupe_and_resolve_prompt_conflicts(
-        [quality_prefix, anat_boost, "solo" if not any(m in scene_focus.lower() for m in ("2girls", "two women", "multiple girls", "group", "crowd", "threesome")) else "", physical_traits, cleaned_harmonized_kw],
-        scene_text=scene_focus,
+        [quality_prefix, anat_boost, solo_tag, state_tags, physical_traits, cleaned_harmonized_kw],
+        scene_text=f"{scene_focus} {state_tags}",
     )
     return ", ".join(final_tags)
