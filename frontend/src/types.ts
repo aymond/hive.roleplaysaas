@@ -76,6 +76,16 @@ export interface ChatMessage {
   created_at?: string;
 }
 
+export interface SceneState {
+  location: string;
+  time_and_lighting: string;
+  attire: string;
+  hairstyle: string;
+  makeup: string;
+  skin_and_condition: string;
+  pose_and_action: string;
+}
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -86,6 +96,7 @@ export interface ChatSession {
   messages: ChatMessage[];
   situation_checkpoint?: string;
   checkpoint_msg_count?: number;
+  scene_state?: SceneState;
   created_at?: string;
   updated_at?: string;
 }

@@ -4,6 +4,7 @@ import type {
   GalleryAsset,
   InferenceConfig,
   Lorebook,
+  SceneState,
   SystemStatus,
   TriggeredLoreInfo,
   WorkflowExecutionResult,
@@ -145,6 +146,11 @@ export const api = {
     request<{ session: ChatSession }>(`/api/chats/${chatId}/checkpoint`, {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  updateChatSceneState: (chatId: string, state: SceneState) =>
+    request<{ session: ChatSession }>(`/api/chats/${chatId}/scene-state`, {
+      method: 'POST',
+      body: JSON.stringify(state),
     }),
 
   // Node Workflows

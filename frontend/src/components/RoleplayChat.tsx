@@ -23,6 +23,7 @@ import type {
   ChatSession,
   GalleryAsset,
   Lorebook,
+  SceneState,
   TriggeredLoreInfo,
 } from '../types';
 import { GenerationProgressCard, useElapsedTimer } from './GenerationFeedback';
@@ -91,10 +92,22 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [lastProvider, setLastProvider] = useState<string>('Ollama / ComfyUI Hybrid');
   const [newChatCharId, setNewChatCharId] = useState<string>(characters[0]?.id || '');
 
-  // Right sidebar tab: 'backstory_studio' | 'lore_inspector'
-  const [rightTab, setRightTab] = useState<'backstory_studio' | 'lore_inspector'>(
-    'backstory_studio'
-  );
+  // Right sidebar collapsible & tab: 'backstory_studio' | 'lore_inspector' | 'scene_state'
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightTab, setRightTab] = useState<
+    'backstory_studio' | 'lore_inspector' | 'scene_state'
+  >('backstory_studio');
+  const [visibleSnapshotCount, setVisibleSnapshotCount] = useState(6);
+  const [savingSceneState, setSavingSceneState] = useState(false);
+  const [sceneStateDraft, setSceneStateDraft] = useState<SceneState>({
+    location: '',
+    time_and_lighting: '',
+    attire: '',
+    hairstyle: '',
+    makeup: '',
+    skin_and_condition: '',
+    pose_and_action: '',
+  });
 
   // Backstory Standalone Image Generator state
   const [backstoryPrompt, setBackstoryPrompt] = useState(
@@ -124,6 +137,19 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeSession?.messages.length, sending, illustratingMsgId]);
+
+  useEffect(() => {
+    setVisibleSnapshotCount(6);
+    setSceneStateDraft({
+      location: activeSession?.scene_state?.location || '',
+      time_and_lighting: activeSession?.scene_state?.time_and_lighting || '',
+      attire: activeSession?.scene_state?.attire || '',
+      hairstyle: activeSession?.scene_state?.hairstyle || '',
+      makeup: activeSession?.scene_state?.makeup || '',
+      skin_and_condition: activeSession?.scene_state?.skin_and_condition || '',
+      pose_and_action: activeSession?.scene_state?.pose_and_action || '',
+    });
+  }, [activeSession?.id, activeSession?.scene_state]);
 
   const latestTriggeredLore: TriggeredLoreInfo[] = React.useMemo(() => {
     if (!activeSession) return [];
@@ -292,6 +318,19 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     }
   };
 
+  const handleSaveSceneState = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!activeSession || savingSceneState) return;
+    setSavingSceneState(true);
+    try {
+      const res = await api.updateChatSceneState(activeSession.id, sceneStateDraft);
+      const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
+      onChatsUpdated(nextChats);
+    } finally {
+      setSavingSceneState(false);
+    }
+  };
+
   const quickBackstoryIdeas = [
     'Walking barefoot along the sunlit shoreline in the ocean breeze',
     'Sipping a tropical cocktail at the candlelit beach cabana at dusk',
@@ -385,7 +424,11 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
       </aside>
 
       {/* Center Column: Interactive Tavern Chat Stream */}
-      <section className="col-span-9 lg:col-span-6 flex flex-col h-full overflow-hidden bg-[#090b10]">
+      <section
+        className={`col-span-9 ${
+          rightPanelOpen ? 'lg:col-span-6' : 'lg:col-span-10'
+        } flex flex-col h-full overflow-hidden bg-[#090b10]`}
+      >
         {activeSession && activeCharacter ? (
           <>
             {/* Compact Chat Context Header */}
@@ -443,6 +486,24 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                 >
                   <Wand2 className="w-3.5 h-3.5" />
                   Open in Node Studio
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightPanelOpen((prev) => !prev)}
+                  className="hidden lg:flex px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 text-xs font-medium items-center gap-1 cursor-pointer transition"
+                  title={rightPanelOpen ? 'Collapse Studio & State Panel' : 'Expand Studio & State Panel'}
+                >
+                  {rightPanelOpen ? (
+                    <>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                      Hide Panel
+                    </>
+                  ) : (
+                    <>
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                      Studio / State
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -833,38 +894,64 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
         )}
       </section>
 
-      {/* Right Column: Backstory Image Studio & Live Lore Inspector */}
-      <aside className="hidden lg:flex lg:col-span-4 border-l border-white/10 bg-[#0d1017] flex-col h-full overflow-hidden">
-        {/* Sub-Navigation Toggle inside Right Drawer */}
-        <div className="p-2.5 border-b border-white/10 bg-[#0a0d14] grid grid-cols-2 gap-1.5">
-          <button
-            type="button"
-            onClick={() => setRightTab('backstory_studio')}
-            className={`py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-              rightTab === 'backstory_studio'
-                ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                : 'bg-[#141926] text-slate-300 hover:text-white'
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5" />
-            Backstory Image Studio
-          </button>
-          <button
-            type="button"
-            onClick={() => setRightTab('lore_inspector')}
-            className={`py-1.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-              rightTab === 'lore_inspector'
-                ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                : 'bg-[#141926] text-slate-300 hover:text-white'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            Persona & Lore ({latestTriggeredLore.length})
-          </button>
-        </div>
+      {/* Right Column: Collapsible Backstory Studio, Persona & Lore, and Scene State */}
+      {rightPanelOpen && (
+        <aside className="hidden lg:flex lg:col-span-4 border-l border-white/10 bg-[#0d1017] flex-col h-full overflow-hidden">
+          {/* Sub-Navigation Toggle inside Right Drawer */}
+          <div className="p-2.5 border-b border-white/10 bg-[#0a0d14] grid grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => setRightTab('backstory_studio')}
+              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
+                rightTab === 'backstory_studio'
+                  ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                  : 'bg-[#141926] text-slate-300 hover:text-white'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5 shrink-0" />
+              Studio
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightTab('scene_state')}
+              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
+                rightTab === 'scene_state'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'bg-[#141926] text-slate-300 hover:text-white'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              Scene State
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightTab('lore_inspector')}
+              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
+                rightTab === 'lore_inspector'
+                  ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                  : 'bg-[#141926] text-slate-300 hover:text-white'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 shrink-0" />
+              Lore ({latestTriggeredLore.length})
+            </button>
+          </div>
 
-        {rightTab === 'backstory_studio' ? (
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {rightTab === 'backstory_studio' ? (
+            <div
+              className="flex-1 overflow-y-auto p-4 space-y-4"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (
+                  el.scrollHeight - el.scrollTop - el.clientHeight < 140 &&
+                  visibleSnapshotCount < characterBackstoryAssets.length
+                ) {
+                  setVisibleSnapshotCount((prev) =>
+                    Math.min(characterBackstoryAssets.length, prev + 6)
+                  );
+                }
+              }}
+            >
             {/* Backstory Studio Header & Form */}
             <form
               onSubmit={handleGenerateBackstoryImage}
@@ -1081,12 +1168,12 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Roleplay Backstory Snapshots ({characterBackstoryAssets.length})
+                  Roleplay Backstory Snapshots ({Math.min(visibleSnapshotCount, characterBackstoryAssets.length)} / {characterBackstoryAssets.length})
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
-                {characterBackstoryAssets.map((asset) => (
+                {characterBackstoryAssets.slice(0, visibleSnapshotCount).map((asset) => (
                   <div
                     key={asset.id}
                     className="group rounded-xl overflow-hidden bg-[#121622] border border-white/10 hover:border-cyan-400/50 transition flex flex-col justify-between"
@@ -1141,7 +1228,68 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                   </div>
                 ))}
               </div>
+
+              {visibleSnapshotCount < characterBackstoryAssets.length && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVisibleSnapshotCount((prev) =>
+                      Math.min(characterBackstoryAssets.length, prev + 6)
+                    )
+                  }
+                  className="w-full py-2 rounded-xl bg-[#141926] hover:bg-[#1a2234] border border-white/10 text-xs font-semibold text-cyan-300 cursor-pointer transition"
+                >
+                  Load More Snapshots ({characterBackstoryAssets.length - visibleSnapshotCount} remaining)
+                </button>
+              )}
             </div>
+          </div>
+        ) : rightTab === 'scene_state' ? (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <form onSubmit={handleSaveSceneState} className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5" />
+                  Live Tracked Scene State
+                </h3>
+                <button
+                  type="submit"
+                  disabled={savingSceneState || !activeSession}
+                  className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-[11px] cursor-pointer transition"
+                >
+                  {savingSceneState ? 'Saving...' : 'Save State'}
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Updated automatically each turn and fed into both roleplay replies and image prompts. Edit any field below to override.
+              </p>
+              {(
+                [
+                  ['location', 'Location', 'e.g. Solana Cove beach, candlelit cabana'],
+                  ['time_and_lighting', 'Time & Lighting', 'e.g. golden hour sunset, moonlit night'],
+                  ['attire', 'Attire / State of Undress', 'e.g. string bikini, completely nude, silk dress'],
+                  ['hairstyle', 'Hairstyle', 'e.g. wet slicked-back hair, loose tousled hair'],
+                  ['makeup', 'Makeup', 'e.g. natural bare-faced, smoky evening makeup'],
+                  ['skin_and_condition', 'Skin & Condition', 'e.g. wet glistening skin, sun-kissed dry skin'],
+                  ['pose_and_action', 'Pose & Action', 'e.g. walking away along shoreline'],
+                ] as const
+              ).map(([field, label, placeholder]) => (
+                <div key={field} className="space-y-1">
+                  <label className="block text-[11px] font-semibold text-slate-300">
+                    {label}
+                  </label>
+                  <input
+                    type="text"
+                    value={sceneStateDraft[field]}
+                    onChange={(e) =>
+                      setSceneStateDraft((prev) => ({ ...prev, [field]: e.target.value }))
+                    }
+                    placeholder={placeholder}
+                    className="w-full rounded-lg bg-[#090c14] border border-white/15 px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              ))}
+            </form>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
@@ -1259,7 +1407,8 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
             )}
           </div>
         )}
-      </aside>
+        </aside>
+      )}
     </div>
   );
 };
