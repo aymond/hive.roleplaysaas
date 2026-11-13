@@ -921,7 +921,11 @@ def dedupe_and_resolve_prompt_conflicts(
     )
     is_explicit_nude = any(
         k in combined_l
-        for k in ("completely nude", "naked", "topless", "vulva", "labia", "pussy", "bare breasts")
+        for k in ("completely nude", "naked", "topless", "vulva", "labia", "pussy", "bare breasts", "take your bikini off", "taking off", "undress")
+    )
+    has_swimwear_in_scene = any(
+        k in (scene_text or "").lower()
+        for k in ("bikini", "swimsuit", "swimwear", "lingerie")
     )
     scene_l = (scene_text or "").lower()
 
@@ -968,9 +972,11 @@ def dedupe_and_resolve_prompt_conflicts(
         ):
             continue
 
-        # Attire vs nudity conflict guard (unless explicitly mentioned in the active scene turn)
-        if is_explicit_nude and not is_weighted:
-            clothing_words = ("cloak", "dress", "gown", "coat", "trenchcoat", "robe", "armor", "suit", "bikini", "lingerie", "panties", "bra")
+        # Attire vs nudity/swimwear conflict guard (unless explicitly mentioned in the active scene turn)
+        if (is_explicit_nude or has_swimwear_in_scene) and not is_weighted:
+            clothing_words = ("cloak", "dress", "gown", "coat", "trenchcoat", "robe", "armor", "suit", "belt")
+            if is_explicit_nude:
+                clothing_words = (*clothing_words, "bikini", "lingerie", "panties", "bra")
             if any(cw in norm and cw not in scene_l for cw in clothing_words):
                 continue
 
@@ -1031,7 +1037,7 @@ async def harmonize_sdxl_prompt(
         "those are locked separately from the character card.\n"
         "2. Resolve all conflicts in favor of the CURRENT SCENE & USER REQUEST: if the scene is at night/moonlit/indoors, "
         "drop conflicting sunset/golden-hour tags; if the pose is from behind/walking away, drop 'looking at viewer'; "
-        "if the character is nude or in swimwear, drop conflicting default clothing.\n"
+        "if the current turn mentions swimwear, undressing, or nudity, NEVER carry over old outfits (dresses, gowns, cloaks, belts) from the situation checkpoint.\n"
         "3. Remove all duplicate or redundant concepts (never repeat '8k', 'masterpiece', 'wet skin', etc.).\n"
         "4. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO sentences, NO refusals)."
     )
