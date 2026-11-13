@@ -889,6 +889,7 @@ async def generate_image_asset(
     guidance = cfg if cfg is not None else config.default_cfg
     actual_seed = seed if seed is not None else int.from_bytes(uuid.uuid4().bytes[:4], "big") % 1_000_000
 
+    t_start = time.perf_counter()
     img_bytes: bytes | None = None
     provider_used = "procedural_art (Apple Silicon Instant Canvas)"
 
@@ -968,6 +969,15 @@ async def generate_image_asset(
     except Exception:
         pass
 
+    elapsed = time.perf_counter() - t_start
+    logger.info(
+        "⏱️ IMAGE←   | provider=%s | %dx%d | total=%.2fs",
+        provider_used,
+        w,
+        h,
+        elapsed,
+    )
+
     return {
         "filename": filename,
         "url": f"/media/generated/{filename}",
@@ -979,4 +989,5 @@ async def generate_image_asset(
         "cfg": guidance,
         "seed": actual_seed,
         "provider": provider_used,
+        "duration_ms": round(elapsed * 1000, 1),
     }

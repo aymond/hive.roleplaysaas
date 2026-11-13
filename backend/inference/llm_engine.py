@@ -1515,6 +1515,7 @@ async def build_contextual_scene_prompt(
     4. Resolving duplicates and conflicts deterministically
     """
     char_name = character.name if character else "Character"
+    t0 = time.perf_counter()
     state_tags = format_scene_state_tags(scene_state)
     scenario_text = ""
     if state_tags:
@@ -1582,4 +1583,12 @@ async def build_contextual_scene_prompt(
         [quality_prefix, anat_boost, solo_tag, action_tags, state_tags, physical_traits, cleaned_harmonized_kw],
         scene_text=f"{scene_focus} {state_tags}",
     )
-    return ", ".join(final_tags)
+    final_prompt = ", ".join(final_tags)
+    logger.info(
+        "⏱️ PROMPT   | Built scene prompt in %.2fs | action_scene=%s | tags=%d | chars=%d",
+        time.perf_counter() - t0,
+        action_scene,
+        len(final_tags),
+        len(final_prompt),
+    )
+    return final_prompt

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from typing import Any
 
@@ -537,6 +538,8 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     session.messages.append(user_msg)
 
     # Scan recent context against Lorebook
+    t_total0 = time.perf_counter()
+    t0 = time.perf_counter()
     combined_scan_text = " ".join(m.content for m in session.messages[-3:])
     lore_res = scan_lorebook(
         lorebook=world,
@@ -544,9 +547,13 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         char_name=card.name,
         user_name=session.user_persona_name,
     )
+    lore_ms = (time.perf_counter() - t0) * 1000
 
+    t0 = time.perf_counter()
     await _maybe_update_chat_checkpoint(session, card)
+    ckpt_ms = (time.perf_counter() - t0) * 1000
 
+    t0 = time.perf_counter()
     reply_text, provider_used = await generate_roleplay_reply(
         config=storage.config,
         character=card,
@@ -558,6 +565,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         situation_checkpoint=session.situation_checkpoint,
         scene_state=session.scene_state,
     )
+    reply_ms = (time.perf_counter() - t0) * 1000
 
     assistant_msg = ChatMessage(
         role="assistant",
@@ -569,6 +577,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     )
     session.messages.append(assistant_msg)
 
+    t0 = time.perf_counter()
     session.scene_state = await update_scene_state(
         config=storage.config,
         previous_state=session.scene_state,
@@ -576,8 +585,20 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         assistant_text=reply_text,
         world_aesthetic=world.aesthetic_style if world else "",
     )
+    scene_state_ms = (time.perf_counter() - t0) * 1000
+    total_ms = (time.perf_counter() - t_total0) * 1000
+    logger.info(
+        "⏱️ CHAT     | total=%.2fs (lore=%.0fms, ckpt=%.0fms, reply=%.2fs, scene_state=%.2fs)",
+        total_ms / 1000,
+        lore_ms,
+        ckpt_ms,
+        reply_ms / 1000,
+        scene_state_ms / 1000,
+    )
 
+    illustrate_timings: dict[str, float] | None = None
     if req.illustrate_scene:
+        t_ill_prompt = time.perf_counter()
         image_prompt = await build_contextual_scene_prompt(
             config=storage.config,
             character=card,
@@ -589,12 +610,19 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
             situation_checkpoint=session.situation_checkpoint,
             scene_state=session.scene_state,
         )
+        ill_prompt_ms = (time.perf_counter() - t_ill_prompt) * 1000
+        t_ill_render = time.perf_counter()
         img_meta = await generate_image_asset(
             config=storage.config,
             output_dir=storage.generated_dir,
             prompt=image_prompt,
             negative_prompt=card.negative_prompt_tags,
         )
+        ill_render_ms = (time.perf_counter() - t_ill_render) * 1000
+        illustrate_timings = {
+            "prompt_ms": round(ill_prompt_ms, 1),
+            "render_ms": round(ill_render_ms, 1),
+        }
         assistant_msg.image_url = img_meta["url"]
         assistant_msg.image_prompt = image_prompt
         storage.gallery.insert(
@@ -615,10 +643,21 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     session.updated_at = utc_now_iso()
     storage.save()
 
+    timings: dict[str, Any] = {
+        "lore_ms": round(lore_ms, 1),
+        "ckpt_ms": round(ckpt_ms, 1),
+        "reply_ms": round(reply_ms, 1),
+        "scene_state_ms": round(scene_state_ms, 1),
+        "total_ms": round(total_ms, 1),
+    }
+    if illustrate_timings:
+        timings["illustrate"] = illustrate_timings
+
     return {
         "session": session.model_dump(),
         "provider": provider_used,
         "triggered_lore": [t.model_dump() for t in lore_res.triggered],
+        "timings": timings,
     }
 
 
@@ -715,6 +754,8 @@ async def illustrate_chat_message(
     )
 
     # Scan surrounding chat turns + character scenario against Lorebook
+    t_total0 = time.perf_counter()
+    t0 = time.perf_counter()
     msg_idx = session.messages.index(target_msg)
     window_msgs = session.messages[max(0, msg_idx - 1) : min(len(session.messages), msg_idx + 2)]
     scan_text = " ".join(m.content for m in window_msgs) + " " + (card.scenario if card else "")
@@ -724,6 +765,7 @@ async def illustrate_chat_message(
         char_name=card.name if card else "Character",
         user_name=session.user_persona_name,
     )
+    lore_ms = (time.perf_counter() - t0) * 1000
     has_tracked_setting = bool(
         (session.scene_state.location or "").strip()
         or (session.scene_state.time_and_lighting or "").strip()
@@ -732,6 +774,7 @@ async def illustrate_chat_message(
         "" if has_tracked_setting else (world.aesthetic_style if world else "")
     )
 
+    t0 = time.perf_counter()
     if custom_prompt:
         full_prompt = custom_prompt
     else:
@@ -746,12 +789,23 @@ async def illustrate_chat_message(
             situation_checkpoint=session.situation_checkpoint,
             scene_state=session.scene_state,
         )
+    prompt_ms = (time.perf_counter() - t0) * 1000
 
+    t0 = time.perf_counter()
     img_meta = await generate_image_asset(
         config=storage.config,
         output_dir=storage.generated_dir,
         prompt=full_prompt,
         negative_prompt=card.negative_prompt_tags if card else "blurry, low quality",
+    )
+    render_ms = (time.perf_counter() - t0) * 1000
+    total_ms = (time.perf_counter() - t_total0) * 1000
+    logger.info(
+        "⏱️ SCENE    | total=%.2fs (lore=%.0fms, prompt=%.2fs, render=%.2fs)",
+        total_ms / 1000,
+        lore_ms,
+        prompt_ms / 1000,
+        render_ms / 1000,
     )
     target_msg.image_url = img_meta["url"]
     target_msg.image_prompt = full_prompt
@@ -771,7 +825,16 @@ async def illustrate_chat_message(
     )
     storage.gallery.insert(0, asset)
     storage.save()
-    return {"session": session.model_dump(), "asset": asset.model_dump()}
+    return {
+        "session": session.model_dump(),
+        "asset": asset.model_dump(),
+        "timings": {
+            "lore_ms": round(lore_ms, 1),
+            "prompt_ms": round(prompt_ms, 1),
+            "render_ms": round(render_ms, 1),
+            "total_ms": round(total_ms, 1),
+        },
+    }
 
 
 @app.post("/api/chats/{chat_id}/checkpoint")
@@ -928,6 +991,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
     Generates a standalone image grounded in the roleplay's character persona,
     physical description, scenario backstory, and world lorebook without adding a chat turn.
     """
+    t_studio_start = time.perf_counter()
     session = storage.chats.get(req.chat_id) if req.chat_id else None
     char_id = req.character_id or (session.character_id if session else None)
     world_id = req.world_id or (session.world_id if session else None)
@@ -1045,6 +1109,8 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
 
     neg_prompt = card.negative_prompt_tags if card else "blurry, low quality, deformed, watermark"
 
+    t_render_start = time.perf_counter()
+    prompt_ms = (t_render_start - t_studio_start) * 1000
     img_meta = await generate_image_asset(
         config=storage.config,
         output_dir=storage.generated_dir,
@@ -1057,6 +1123,14 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         seed=req.seed,
         render_mode_override=active_mode,
         face_detailer_override=req.face_detailer,
+    )
+    render_ms = (time.perf_counter() - t_render_start) * 1000
+    total_ms = (time.perf_counter() - t_studio_start) * 1000
+    logger.info(
+        "⏱️ STUDIO   | total=%.2fs (prompt=%.2fs, render=%.2fs)",
+        total_ms / 1000,
+        prompt_ms / 1000,
+        render_ms / 1000,
     )
 
     asset = GalleryAsset(
@@ -1079,4 +1153,9 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         "triggered_lore": triggered_lore_list,
         "image_provider": img_meta["provider"],
         "llm_provider": llm_provider_used,
+        "timings": {
+            "prompt_ms": round(prompt_ms, 1),
+            "render_ms": round(render_ms, 1),
+            "total_ms": round(total_ms, 1),
+        },
     }
