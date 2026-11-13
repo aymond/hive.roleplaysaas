@@ -78,6 +78,10 @@ class SwipeMessageRequest(BaseModel):
     direction: str = "next"  # "next", "prev", or "regenerate"
 
 
+class IllustrateMessageRequest(BaseModel):
+    custom_prompt: str | None = None
+
+
 class LoreScanRequest(BaseModel):
     text: str
     character_name: str = "Character"
@@ -621,7 +625,11 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
 
 
 @app.post("/api/chats/{chat_id}/messages/{msg_id}/illustrate")
-async def illustrate_chat_message(chat_id: str, msg_id: str) -> dict[str, Any]:
+async def illustrate_chat_message(
+    chat_id: str,
+    msg_id: str,
+    req: IllustrateMessageRequest | None = None,
+) -> dict[str, Any]:
     session = storage.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
@@ -633,11 +641,13 @@ async def illustrate_chat_message(chat_id: str, msg_id: str) -> dict[str, Any]:
     card = storage.characters.get(session.character_id)
     world = storage.worlds.get(session.world_id) if session.world_id else None
 
+    custom_prompt = req.custom_prompt.strip() if (req and req.custom_prompt and req.custom_prompt.strip()) else None
     logger.info(
-        "▶ ACTION   | illustrate_chat_message(chat=%r, char=%r, msg_id=%s)",
+        "▶ ACTION   | illustrate_chat_message(chat=%r, char=%r, msg_id=%s, custom_prompt=%s)",
         session.title,
         card.name if card else "None",
         msg_id,
+        "YES" if custom_prompt else "NO",
     )
 
     # Scan surrounding chat turns + character scenario against Lorebook
@@ -652,15 +662,18 @@ async def illustrate_chat_message(chat_id: str, msg_id: str) -> dict[str, Any]:
     )
     lore_visuals = lore_res.visual_tags_block or (world.aesthetic_style if world else "")
 
-    full_prompt = await build_contextual_scene_prompt(
-        config=storage.config,
-        character=card,
-        messages=session.messages,
-        target_msg=target_msg,
-        lore_visuals=lore_visuals,
-        user_name=session.user_persona_name,
-        user_desc=session.user_persona_desc,
-    )
+    if custom_prompt:
+        full_prompt = custom_prompt
+    else:
+        full_prompt = await build_contextual_scene_prompt(
+            config=storage.config,
+            character=card,
+            messages=session.messages,
+            target_msg=target_msg,
+            lore_visuals=lore_visuals,
+            user_name=session.user_persona_name,
+            user_desc=session.user_persona_desc,
+        )
 
     img_meta = await generate_image_asset(
         config=storage.config,

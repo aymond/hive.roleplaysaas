@@ -130,10 +130,13 @@ export const api = {
         body: JSON.stringify({ direction }),
       }
     ),
-  illustrateMessage: (chatId: string, msgId: string) =>
+  illustrateMessage: (chatId: string, msgId: string, customPrompt?: string) =>
     request<{ session: ChatSession; asset: GalleryAsset }>(
       `/api/chats/${chatId}/messages/${msgId}/illustrate`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: customPrompt ? JSON.stringify({ custom_prompt: customPrompt }) : undefined,
+      }
     ),
 
   // Node Workflows

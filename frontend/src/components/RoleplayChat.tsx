@@ -81,6 +81,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [sending, setSending] = useState(false);
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [illustratingMsgId, setIllustratingMsgId] = useState<string | null>(null);
+  const [editedScenePrompts, setEditedScenePrompts] = useState<Record<string, string>>({});
   const [swipingMsgId, setSwipingMsgId] = useState<string | null>(null);
   const [lastProvider, setLastProvider] = useState<string>('Ollama / ComfyUI Hybrid');
   const [newChatCharId, setNewChatCharId] = useState<string>(characters[0]?.id || '');
@@ -194,13 +195,20 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     }
   };
 
-  const handleIllustrateTurn = async (msgId: string) => {
+  const handleIllustrateTurn = async (msgId: string, customPrompt?: string) => {
     if (!activeSession || illustratingMsgId) return;
     setIllustratingMsgId(msgId);
     try {
-      const res = await api.illustrateMessage(activeSession.id, msgId);
+      const res = await api.illustrateMessage(activeSession.id, msgId, customPrompt);
       const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
       onChatsUpdated(nextChats);
+      if (customPrompt) {
+        setEditedScenePrompts((prev) => {
+          const next = { ...prev };
+          delete next[msgId];
+          return next;
+        });
+      }
       onGalleryUpdated();
     } finally {
       setIllustratingMsgId(null);
@@ -487,12 +495,66 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                               style={{ aspectRatio: `${imgW} / ${imgH}` }}
                               className="w-full h-auto max-h-[680px] object-contain mx-auto block"
                             />
-                            {msg.image_prompt && (
-                              <div className="px-3 py-2 text-[11px] text-slate-300 bg-[#0b0e16] font-mono leading-relaxed">
-                                <span className="text-amber-300 font-semibold">Scene Prompt: </span>
-                                {msg.image_prompt}
-                              </div>
-                            )}
+                            {msg.image_prompt && (() => {
+                              const draftPrompt =
+                                editedScenePrompts[msg.id] ?? msg.image_prompt;
+                              const isDirty =
+                                editedScenePrompts[msg.id] !== undefined &&
+                                editedScenePrompts[msg.id] !== msg.image_prompt;
+                              return (
+                                <details className="bg-[#0b0e16] border-t border-white/10 text-[11px] text-slate-300">
+                                  <summary className="px-3 py-2 cursor-pointer select-none flex items-center justify-between text-amber-300 font-semibold hover:bg-white/5 transition">
+                                    <span>View / Edit Scene Prompt</span>
+                                    {isDirty && (
+                                      <span className="text-[10px] text-cyan-300 font-normal">
+                                        (Edited — ready to resubmit)
+                                      </span>
+                                    )}
+                                  </summary>
+                                  <div className="px-3 pb-3 pt-1 space-y-2 border-t border-white/5">
+                                    <textarea
+                                      rows={3}
+                                      value={draftPrompt}
+                                      onChange={(e) =>
+                                        setEditedScenePrompts((prev) => ({
+                                          ...prev,
+                                          [msg.id]: e.target.value,
+                                        }))
+                                      }
+                                      disabled={isIllustratingThis}
+                                      className="w-full bg-[#121724] border border-white/15 rounded-lg p-2 text-[11px] font-mono text-slate-200 leading-relaxed focus:outline-none focus:border-amber-400"
+                                    />
+                                    <div className="flex items-center justify-end gap-2">
+                                      {isDirty && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setEditedScenePrompts((prev) => {
+                                              const next = { ...prev };
+                                              delete next[msg.id];
+                                              return next;
+                                            })
+                                          }
+                                          className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-slate-300 cursor-pointer"
+                                        >
+                                          Reset
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        disabled={isIllustratingThis || !draftPrompt.trim()}
+                                        onClick={() =>
+                                          handleIllustrateTurn(msg.id, draftPrompt.trim())
+                                        }
+                                        className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-[11px] cursor-pointer transition"
+                                      >
+                                        Regenerate with Edited Prompt
+                                      </button>
+                                    </div>
+                                  </div>
+                                </details>
+                              );
+                            })()}
                           </div>
                         );
                       })()}
