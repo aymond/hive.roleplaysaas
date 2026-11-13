@@ -99,6 +99,8 @@ class ChatSession(BaseModel):
     user_persona_name: str = "Traveler"
     user_persona_desc: str = "An observant wanderer exploring the realm."
     messages: list[ChatMessage] = Field(default_factory=list)
+    situation_checkpoint: str = ""
+    checkpoint_msg_count: int = 0
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
 

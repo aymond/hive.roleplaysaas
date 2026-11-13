@@ -84,6 +84,8 @@ export interface ChatSession {
   user_persona_name: string;
   user_persona_desc: string;
   messages: ChatMessage[];
+  situation_checkpoint?: string;
+  checkpoint_msg_count?: number;
   created_at?: string;
   updated_at?: string;
 }

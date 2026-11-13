@@ -8,8 +8,10 @@ from backend.inference.llm_engine import (
     build_anatomical_and_clothing_overrides,
     build_contextual_scene_prompt,
     build_face_detailer_prompt,
+    build_tavern_system_prompt,
     clean_character_visual_tags_for_scene,
     dedupe_and_resolve_prompt_conflicts,
+    distill_situation_checkpoint,
     extract_action_and_scene_beats,
     fallback_extract_sdxl_keywords,
     harmonize_sdxl_prompt,
@@ -331,6 +333,52 @@ def test_harmonize_sdxl_prompt_fallback_on_refusal(monkeypatch) -> None:
     assert "hermes3:8b" in provider
     assert "I cannot" not in tags
     assert "turquoise lagoon" in tags
+
+
+def test_character_card_traits_preserved_verbatim(monkeypatch) -> None:
+    async def fake_harmonize(**kwargs):
+        return "full body shot, walking on beach, sundress, ocean breeze, soft lighting", "mock"
+
+    monkeypatch.setattr("backend.inference.llm_engine.harmonize_sdxl_prompt", fake_harmonize)
+
+    asian_char = CharacterCard(
+        name="Liamching",
+        visual_prompt_tags=(
+            "1girl, stunning asian woman, physical resemblance part Japanese Mila Kunis and part Korean Milla Jovovich, "
+            "expressive dark eyes, long black hair"
+        ),
+    )
+    msg = ChatMessage(role="assistant", sender_name="Liamching", content="*Liamching walks along the sunlit beach.*")
+    cfg = InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors")
+    prompt = asyncio.run(build_contextual_scene_prompt(cfg, asian_char, [msg], msg))
+    assert "stunning asian woman" in prompt
+    assert "Japanese Mila Kunis" in prompt
+    assert "Korean Milla Jovovich" in prompt
+    assert "expressive dark eyes" in prompt
+    assert "silver hair" not in prompt
+    assert "violet eyes" not in prompt
+
+
+def test_situation_checkpoint_distillation_and_prompt_injection(monkeypatch) -> None:
+    async def fake_ollama_chat(config, messages, purpose="chat", temperature_override=None, repeat_penalty=1.18, seed=None, model_override=None):
+        return "They moved from the beach to a candlelit teakwood cabana at night. She is wearing a silk robe."
+
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", fake_ollama_chat)
+
+    char = CharacterCard(name="Liamching", scenario="Meeting at Solana Cove beach.")
+    older = [
+        ChatMessage(role="user", sender_name="Traveler", content="Let's head inside the cabana for the night."),
+        ChatMessage(role="assistant", sender_name="Liamching", content="*She slips into a silk robe inside the candlelit cabana.*"),
+    ]
+    cfg = InferenceConfig(llm_provider="ollama", ollama_model="hermes3:8b", prompt_refiner_model="llama3.2:latest")
+    checkpoint, provider = asyncio.run(distill_situation_checkpoint(cfg, char, older))
+    assert "candlelit teakwood cabana" in checkpoint
+    assert "llama3.2:latest" in provider
+
+    sys_prompt = build_tavern_system_prompt(char, lore_context="", situation_checkpoint=checkpoint)
+    assert "### Current Situation Checkpoint" in sys_prompt
+    assert "candlelit teakwood cabana" in sys_prompt
+
 
 
 

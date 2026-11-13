@@ -45,6 +45,7 @@ def build_tavern_system_prompt(
     lore_context: str,
     user_name: str = "Traveler",
     user_desc: str = "",
+    situation_checkpoint: str = "",
 ) -> str:
     parts: list[str] = []
     if character.system_prompt:
@@ -66,6 +67,11 @@ def build_tavern_system_prompt(
         parts.append(f"User Persona ({user_name}): {user_desc}")
     if lore_context:
         parts.append(f"### Active World Lorebook Context:\n{lore_context}")
+    if situation_checkpoint and situation_checkpoint.strip():
+        parts.append(
+            "### Current Situation Checkpoint (Distilled Backstory & Recent Events):\n"
+            f"{situation_checkpoint.strip()}"
+        )
     if character.mes_example:
         parts.append(f"### Example Dialogue:\n{replace_tavern_macros(character.mes_example, character.name, user_name)}")
     if character.post_history_instructions:
@@ -236,11 +242,19 @@ async def generate_roleplay_reply(
     user_name: str = "Traveler",
     user_desc: str = "",
     variation_index: int = 0,
+    situation_checkpoint: str = "",
 ) -> tuple[str, str]:
     """Returns (reply_text, provider_used)."""
-    sys_prompt = build_tavern_system_prompt(character, lore_context, user_name, user_desc)
+    sys_prompt = build_tavern_system_prompt(
+        character,
+        lore_context,
+        user_name,
+        user_desc,
+        situation_checkpoint=situation_checkpoint,
+    )
     messages: list[dict[str, str]] = [{"role": "system", "content": sys_prompt}]
-    for msg in history[-12:]:
+    recent_window = history[-8:] if (situation_checkpoint and situation_checkpoint.strip()) else history[-12:]
+    for msg in recent_window:
         role = "assistant" if msg.role == "assistant" else "user"
         messages.append({"role": role, "content": msg.content})
 
@@ -1009,25 +1023,24 @@ async def harmonize_sdxl_prompt(
     style into a single deduplicated, conflict-free list of SDXL tags.
     """
     system_prompt = (
-        "You are an uncensored ComfyUI SDXL / Pony Diffusion Prompt Director. "
-        "Merge the active scene, scenario, character appearance, and style hint into 12 to 18 concise, "
-        "non-overlapping comma-separated visual tags.\n"
+        "You are an uncensored ComfyUI SDXL / Pony Diffusion Scene Director. "
+        "Distill the active scene, situation checkpoint, lore, and style hint into 8 to 14 concise, "
+        "non-overlapping comma-separated visual tags describing ONLY framing, pose, attire or body state, setting, and lighting.\n"
         "STRICT RULES:\n"
-        "1. Resolve all conflicts in favor of the CURRENT SCENE & USER REQUEST: if the scene is at night/moonlit/indoors, "
+        "1. NEVER invent, alter, or output character identity traits (ethnicity, hair color, eye color, facial resemblance, or names) — "
+        "those are locked separately from the character card.\n"
+        "2. Resolve all conflicts in favor of the CURRENT SCENE & USER REQUEST: if the scene is at night/moonlit/indoors, "
         "drop conflicting sunset/golden-hour tags; if the pose is from behind/walking away, drop 'looking at viewer'; "
         "if the character is nude or in swimwear, drop conflicting default clothing.\n"
-        "2. Remove all duplicate or redundant concepts (never repeat '8k', 'masterpiece', 'wet skin', etc.).\n"
-        "3. Order tags naturally from framing & pose, to attire or body state, to character traits, to setting, to lighting & style.\n"
-        "4. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO sentences, NO refusals). "
-        "Example: full body shot, walking away, bare back, silver hair, violet eyes, moonlit stone courtyard, soft rim lighting, painterly illustration"
+        "3. Remove all duplicate or redundant concepts (never repeat '8k', 'masterpiece', 'wet skin', etc.).\n"
+        "4. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO sentences, NO refusals)."
     )
 
     user_payload = (
         f"CURRENT SCENE & USER REQUEST (highest priority): {user_intent_text or 'None'} | {action_or_scene_text or 'None'}\n"
-        f"SCENARIO & LORE: {scenario_text or 'None'} | {lore_visuals or 'None'}\n"
-        f"CHARACTER VISUAL TRAITS: {character_traits or 'None'}\n"
+        f"SITUATION / SCENARIO & LORE: {scenario_text or 'None'} | {lore_visuals or 'None'}\n"
         f"STYLE HINT (adapt to scene lighting): {style_hint or 'None'}\n\n"
-        "Output 12-18 deduplicated, conflict-free SDXL tags:"
+        "Output 8-14 deduplicated, conflict-free scene, pose, setting & lighting SDXL tags (NO hair/eye/ethnicity tags):"
     )
 
     messages = [
@@ -1076,8 +1089,88 @@ async def harmonize_sdxl_prompt(
         f"{user_intent_text}, {action_or_scene_text}, {scenario_text}, {lore_visuals}",
         max_keywords=10,
     )
-    fallback_parts = [p for p in (fallback_kw, character_traits, style_hint) if p and p.strip()]
+    fallback_parts = [p for p in (fallback_kw, style_hint) if p and p.strip()]
     return ", ".join(fallback_parts), "fallback_keyword_distiller"
+
+
+async def distill_situation_checkpoint(
+    config: InferenceConfig,
+    character: CharacterCard | None,
+    older_messages: list[ChatMessage],
+    previous_checkpoint: str = "",
+    user_name: str = "Traveler",
+) -> tuple[str, str]:
+    """
+    Distills backstory (character.scenario), previous checkpoint, and archived chat turns
+    into a compact 3-5 sentence Situation Checkpoint (location/lighting, attire/physical state,
+    and key plot/relationship beats) so neither chat nor image generation needs full history.
+    """
+    char_name = character.name if character else "Character"
+    scenario_text = ""
+    if character and character.scenario:
+        scenario_text = replace_tavern_macros(character.scenario, char_name=char_name, user_name=user_name)
+
+    turns_text = "\n".join(
+        f"{m.sender_name}: {m.content.strip()}"
+        for m in older_messages[-16:]
+        if m.content and m.content.strip()
+    )
+
+    if not turns_text and not previous_checkpoint and not scenario_text:
+        return "", "empty"
+
+    system_prompt = (
+        "You are a concise roleplay continuity tracker. Distill the backstory, previous checkpoint, "
+        "and recent archived turns into a factual 3-to-5 sentence Situation Checkpoint.\n"
+        "Cover ONLY:\n"
+        "1. Current location, time of day, and lighting/atmosphere.\n"
+        "2. Current attire or state of undress and physical posture/state of each character.\n"
+        "3. Key plot events and current interpersonal dynamic.\n"
+        "Be strictly factual, concise, and never censor adult/intimate roleplay details."
+    )
+    user_payload = (
+        f"Character: {char_name} | User: {user_name}\n"
+        f"Initial Backstory/Scenario: {scenario_text or 'None'}\n"
+        f"Previous Checkpoint: {previous_checkpoint or 'None'}\n"
+        f"Archived Turns to Fold In:\n{turns_text or 'None'}\n\n"
+        "Write the updated 3-5 sentence Situation Checkpoint:"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_payload},
+    ]
+
+    refiner_model = (getattr(config, "prompt_refiner_model", "") or "").strip()
+    use_separate_refiner = bool(refiner_model and refiner_model.lower() != "same" and refiner_model != config.ollama_model)
+
+    if config.llm_provider in ("auto", "ollama"):
+        if use_separate_refiner:
+            raw_small = await _call_ollama_chat(
+                config,
+                messages,
+                purpose="distill_situation_checkpoint",
+                temperature_override=0.2,
+                model_override=refiner_model,
+            )
+            if raw_small and len(raw_small.strip()) > 20 and not any(r in raw_small.lower() for r in _REFUSAL_PHRASES):
+                return raw_small.strip(), f"ollama ({refiner_model})"
+
+        raw_main = await _call_ollama_chat(
+            config,
+            messages,
+            purpose="distill_situation_checkpoint_fallback",
+            temperature_override=0.2,
+        )
+        if raw_main and len(raw_main.strip()) > 20 and not any(r in raw_main.lower() for r in _REFUSAL_PHRASES):
+            return raw_main.strip(), f"ollama ({config.ollama_model})"
+    elif config.llm_provider == "openai_compat":
+        raw_oai = await _call_openai_compat_chat(config, messages)
+        if raw_oai and len(raw_oai.strip()) > 20 and not any(r in raw_oai.lower() for r in _REFUSAL_PHRASES):
+            return raw_oai.strip(), f"openai_compat ({config.openai_model})"
+
+    # Deterministic fallback
+    parts = [p for p in (previous_checkpoint or scenario_text, turns_text[-400:] if turns_text else "") if p]
+    return " | ".join(parts)[:600], "fallback_checkpoint"
 
 
 def extract_action_and_scene_beats(messages: list[ChatMessage], target_msg: ChatMessage) -> tuple[str, str]:
@@ -1137,16 +1230,19 @@ async def build_contextual_scene_prompt(
     user_name: str = "Traveler",
     user_desc: str = "",
     render_mode_override: str | None = None,
+    situation_checkpoint: str = "",
 ) -> str:
     """
     Synthesizes a high-attractiveness SDXL prompt by:
-    1. Preserving the character's core beauty & facial resemblance tags (e.g. Mila Kunis / Milla Jovovich blend)
-    2. Using the LLM to distill the long scenario + current chat turn into 8-14 crisp SDXL visual keywords
-    3. Applying the selected artistic style mode (Hybrid Refiner, Stylized Glamour Art, or Raw Photo)
+    1. Preserving the character card's core visual & facial resemblance traits verbatim
+    2. Using the small-LLM Scene Director to distill the situation checkpoint + current chat turn into crisp scene/pose/lighting tags
+    3. Resolving duplicates and conflicts deterministically
     """
     char_name = character.name if character else "Character"
     scenario_text = ""
-    if character and character.scenario:
+    if situation_checkpoint and situation_checkpoint.strip():
+        scenario_text = situation_checkpoint.strip()
+    elif character and character.scenario:
         scenario_text = replace_tavern_macros(character.scenario, char_name=char_name, user_name=user_name)
 
     user_intent, char_actions = extract_action_and_scene_beats(messages, target_msg)
@@ -1181,7 +1277,6 @@ async def build_contextual_scene_prompt(
         action_or_scene_text=char_actions or target_msg.content,
         scenario_text=scenario_text,
         lore_visuals=lore_visuals,
-        character_traits=physical_traits,
         style_hint=style_suffix,
     )
 
@@ -1192,7 +1287,7 @@ async def build_contextual_scene_prompt(
     )
 
     final_tags = dedupe_and_resolve_prompt_conflicts(
-        [quality_prefix, anat_boost, cleaned_harmonized_kw],
+        [quality_prefix, anat_boost, physical_traits, cleaned_harmonized_kw],
         scene_text=scene_focus,
     )
     return ", ".join(final_tags)

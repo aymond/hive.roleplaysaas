@@ -22,6 +22,7 @@ from .inference.llm_engine import (
     clean_character_visual_tags_for_scene,
     dedupe_and_resolve_prompt_conflicts,
     distill_narrative_to_sdxl_keywords,
+    distill_situation_checkpoint,
     fallback_extract_sdxl_keywords,
     generate_roleplay_reply,
     harmonize_sdxl_prompt,
@@ -82,6 +83,48 @@ class SwipeMessageRequest(BaseModel):
 
 class IllustrateMessageRequest(BaseModel):
     custom_prompt: str | None = None
+
+
+class CheckpointRequest(BaseModel):
+    refresh: bool = True
+    custom_checkpoint: str | None = None
+
+
+async def _maybe_update_chat_checkpoint(
+    session: ChatSession,
+    card: CharacterCard | None,
+    force: bool = False,
+) -> str:
+    """Updates session.situation_checkpoint when >= 8 new messages accumulate since last checkpoint, or when forced."""
+    total = len(session.messages)
+    keep_recent = 6
+    if not force:
+        if total < 8 or (total - session.checkpoint_msg_count) < 8:
+            return session.situation_checkpoint
+        older_slice = session.messages[session.checkpoint_msg_count : max(0, total - keep_recent)]
+        new_count = max(0, total - keep_recent)
+    else:
+        older_slice = session.messages
+        new_count = total
+
+    checkpoint_text, provider = await distill_situation_checkpoint(
+        config=storage.config,
+        character=card,
+        older_messages=older_slice,
+        previous_checkpoint=session.situation_checkpoint,
+        user_name=session.user_persona_name,
+    )
+    if checkpoint_text:
+        session.situation_checkpoint = checkpoint_text
+        session.checkpoint_msg_count = new_count
+        logger.info(
+            "📌 CHECKPT  | chat=%r | folded=%d/%d msgs | provider=%s",
+            session.title,
+            new_count,
+            total,
+            provider,
+        )
+    return session.situation_checkpoint
 
 
 class LoreScanRequest(BaseModel):
@@ -499,6 +542,8 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         user_name=session.user_persona_name,
     )
 
+    await _maybe_update_chat_checkpoint(session, card)
+
     reply_text, provider_used = await generate_roleplay_reply(
         config=storage.config,
         character=card,
@@ -507,6 +552,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         triggered_lore=lore_res.triggered,
         user_name=session.user_persona_name,
         user_desc=session.user_persona_desc,
+        situation_checkpoint=session.situation_checkpoint,
     )
 
     assistant_msg = ChatMessage(
@@ -528,6 +574,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
             lore_visuals=lore_res.visual_tags_block,
             user_name=session.user_persona_name,
             user_desc=session.user_persona_desc,
+            situation_checkpoint=session.situation_checkpoint,
         )
         img_meta = await generate_image_asset(
             config=storage.config,
@@ -617,6 +664,7 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
         user_name=session.user_persona_name,
         user_desc=session.user_persona_desc,
         variation_index=variation_idx,
+        situation_checkpoint=session.situation_checkpoint,
     )
     target_msg.swipes.append(new_reply)
     target_msg.active_swipe = len(target_msg.swipes) - 1
@@ -675,6 +723,7 @@ async def illustrate_chat_message(
             lore_visuals=lore_visuals,
             user_name=session.user_persona_name,
             user_desc=session.user_persona_desc,
+            situation_checkpoint=session.situation_checkpoint,
         )
 
     img_meta = await generate_image_asset(
@@ -702,6 +751,24 @@ async def illustrate_chat_message(
     storage.gallery.insert(0, asset)
     storage.save()
     return {"session": session.model_dump(), "asset": asset.model_dump()}
+
+
+@app.post("/api/chats/{chat_id}/checkpoint")
+async def update_chat_checkpoint(chat_id: str, req: CheckpointRequest) -> dict[str, Any]:
+    session = storage.chats.get(chat_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    card = storage.characters.get(session.character_id)
+
+    if req.custom_checkpoint is not None:
+        session.situation_checkpoint = req.custom_checkpoint.strip()
+        session.checkpoint_msg_count = len(session.messages)
+    elif req.refresh:
+        await _maybe_update_chat_checkpoint(session, card, force=True)
+
+    session.updated_at = utc_now_iso()
+    storage.save()
+    return {"session": session.model_dump()}
 
 
 # --- ComfyUI-Style Visual Node Workflows Endpoints ---
@@ -904,7 +971,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
             clean_desc = replace_tavern_macros(card.description, char_name=card.name, user_name="Traveler")
             char_traits = fallback_extract_sdxl_keywords(clean_desc, max_keywords=8)
 
-    # 4. Harmonize Scenario, Lore, Character Traits, and Style via small LLM + conflict/dedup guard
+    # 4. Harmonize Scenario, Lore, and Style via small LLM (character traits stay locked verbatim!)
     llm_provider_used = None
     harmonized_kw = ""
     if scenario_to_distill or lore_visuals_to_distill or req.use_llm_director:
@@ -915,13 +982,12 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
                 action_or_scene_text=req.custom_prompt.strip(),
                 scenario_text=scenario_to_distill,
                 lore_visuals=lore_visuals_to_distill,
-                character_traits=char_traits,
                 style_hint=style_suffix,
             )
         elif lore_visuals_to_distill:
-            harmonized_kw = ", ".join(p for p in (lore_visuals_to_distill, char_traits, style_suffix) if p)
+            harmonized_kw = ", ".join(p for p in (lore_visuals_to_distill, style_suffix) if p)
     else:
-        harmonized_kw = ", ".join(p for p in (req.custom_prompt.strip(), char_traits, style_suffix) if p)
+        harmonized_kw = ", ".join(p for p in (req.custom_prompt.strip(), style_suffix) if p)
 
     scene_focus = f"{req.custom_prompt} {scenario_to_distill}"
     anat_boost, cleaned_harmonized_kw, _ = build_anatomical_and_clothing_overrides(
@@ -930,6 +996,8 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
     )
     if anat_boost:
         prompt_segments.append(anat_boost)
+    if char_traits:
+        prompt_segments.append(char_traits)
     if cleaned_harmonized_kw:
         prompt_segments.append(cleaned_harmonized_kw)
 

@@ -138,6 +138,14 @@ export const api = {
         body: customPrompt ? JSON.stringify({ custom_prompt: customPrompt }) : undefined,
       }
     ),
+  updateChatCheckpoint: (
+    chatId: string,
+    payload: { refresh?: boolean; custom_checkpoint?: string }
+  ) =>
+    request<{ session: ChatSession }>(`/api/chats/${chatId}/checkpoint`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // Node Workflows
   listWorkflows: () => request<WorkflowGraph[]>('/api/workflows'),

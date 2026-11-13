@@ -14,6 +14,8 @@ import {
   Camera,
   Download,
   Layers,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
 import type {
@@ -82,6 +84,9 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [illustratingMsgId, setIllustratingMsgId] = useState<string | null>(null);
   const [editedScenePrompts, setEditedScenePrompts] = useState<Record<string, string>>({});
+  const [checkpointOpen, setCheckpointOpen] = useState(false);
+  const [checkpointDraft, setCheckpointDraft] = useState<string>('');
+  const [updatingCheckpoint, setUpdatingCheckpoint] = useState(false);
   const [swipingMsgId, setSwipingMsgId] = useState<string | null>(null);
   const [lastProvider, setLastProvider] = useState<string>('Ollama / ComfyUI Hybrid');
   const [newChatCharId, setNewChatCharId] = useState<string>(characters[0]?.id || '');
@@ -248,6 +253,34 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     onGalleryUpdated();
   };
 
+  const handleRefreshCheckpoint = async () => {
+    if (!activeSession || updatingCheckpoint) return;
+    setUpdatingCheckpoint(true);
+    try {
+      const res = await api.updateChatCheckpoint(activeSession.id, { refresh: true });
+      const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
+      onChatsUpdated(nextChats);
+      setCheckpointDraft(res.session.situation_checkpoint || '');
+    } finally {
+      setUpdatingCheckpoint(false);
+    }
+  };
+
+  const handleSaveCheckpoint = async () => {
+    if (!activeSession || updatingCheckpoint) return;
+    setUpdatingCheckpoint(true);
+    try {
+      const res = await api.updateChatCheckpoint(activeSession.id, {
+        refresh: false,
+        custom_checkpoint: checkpointDraft,
+      });
+      const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
+      onChatsUpdated(nextChats);
+    } finally {
+      setUpdatingCheckpoint(false);
+    }
+  };
+
   const quickBackstoryIdeas = [
     'Walking barefoot along the sunlit shoreline in the ocean breeze',
     'Sipping a tropical cocktail at the candlelit beach cabana at dusk',
@@ -375,6 +408,25 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
+                  onClick={() => {
+                    const nextOpen = !checkpointOpen;
+                    setCheckpointOpen(nextOpen);
+                    if (nextOpen) {
+                      setCheckpointDraft(activeSession.situation_checkpoint || '');
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 cursor-pointer transition ${
+                    checkpointOpen || activeSession.situation_checkpoint
+                      ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-400/30 text-emerald-200'
+                      : 'bg-white/5 hover:bg-white/10 border-white/15 text-slate-300'
+                  }`}
+                  title="Distilled backstory & situation checkpoint"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Checkpoint
+                </button>
+                <button
+                  type="button"
                   onClick={() => onOpenWorkflowWithChar(activeCharacter.id, activeWorld?.id)}
                   className="px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/30 text-violet-200 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition"
                 >
@@ -383,6 +435,46 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                 </button>
               </div>
             </div>
+
+            {checkpointOpen && (
+              <div className="px-4 py-2.5 border-b border-white/10 bg-[#0d111b] space-y-2 shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
+                    Situation Checkpoint (Distilled Backstory &amp; Roleplay State)
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleRefreshCheckpoint}
+                      disabled={updatingCheckpoint}
+                      className="px-2.5 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 text-emerald-200 text-[11px] font-medium flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      {updatingCheckpoint ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3 h-3" />
+                      )}
+                      Distill Now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveCheckpoint}
+                      disabled={updatingCheckpoint}
+                      className="px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 text-[11px] font-medium cursor-pointer disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  rows={3}
+                  value={checkpointDraft}
+                  onChange={(e) => setCheckpointDraft(e.target.value)}
+                  placeholder="No checkpoint distilled yet. Click 'Distill Now' to summarize the backstory and roleplay so far, or write your own situation state..."
+                  className="w-full rounded-lg bg-[#090c14] border border-white/10 px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-400 resize-y"
+                />
+              </div>
+            )}
 
             {/* Messages Scroll Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
