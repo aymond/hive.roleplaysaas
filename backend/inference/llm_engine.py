@@ -1268,6 +1268,22 @@ _SCENE_FIELD_CHANGE_CUES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _condense_scene_state_value(val: str, max_words: int = 7) -> str:
+    """Caps a SceneState field to a crisp visual phrase (no multi-sentence prose or ellipsis)."""
+    s = " ".join((val or "").replace("\n", " ").split()).strip(" .;,")
+    if not s:
+        return ""
+    # Drop anything after a sentence break or semicolon if it exceeds max_words
+    if len(s.split()) > max_words:
+        first_clause = re.split(r"[.;\n]+|\.\.\.", s)[0].strip(" .;,")
+        if first_clause:
+            s = first_clause
+    words = s.split()
+    if len(words) > max_words:
+        s = " ".join(words[:max_words]).rstrip(".,;:")
+    return s
+
+
 def _parse_scene_state_json(
     raw: str | None,
     fallback: SceneState,
@@ -1285,6 +1301,10 @@ def _parse_scene_state_json(
         pinned = list(fallback.pinned_fields or [])
         turn_l = (turn_text or "").lower()
 
+        max_words_map = {
+            "attire": 10,
+            "pose_and_action": 8,
+        }
         resolved: dict[str, str] = {}
         for key in (
             "location",
@@ -1297,8 +1317,15 @@ def _parse_scene_state_json(
             "skin_and_condition",
             "pose_and_action",
         ):
-            prev_val = (getattr(fallback, key, "") or "").strip()
-            new_val = str(data.get(key, prev_val) or "").strip()
+            prev_val = _condense_scene_state_value(
+                getattr(fallback, key, "") or "",
+                max_words=max_words_map.get(key, 7),
+            )
+            raw_new = str(data.get(key, prev_val) or "").strip()
+            new_val = _condense_scene_state_value(
+                raw_new,
+                max_words=max_words_map.get(key, 7),
+            )
             if key in pinned and prev_val:
                 cues = _SCENE_FIELD_CHANGE_CUES.get(key, ())
                 has_explicit_change = any(cue in turn_l for cue in cues)
@@ -1327,7 +1354,19 @@ async def update_scene_state(
     pinned fields stay locked unless explicitly changed in the latest turn (and remain pinned
     to the new value for the current scenario).
     """
-    prev = previous_state or SceneState()
+    prev_raw = previous_state or SceneState()
+    prev = SceneState(
+        location=_condense_scene_state_value(prev_raw.location, 7),
+        time_and_lighting=_condense_scene_state_value(prev_raw.time_and_lighting, 7),
+        weather=_condense_scene_state_value(prev_raw.weather, 6),
+        atmosphere=_condense_scene_state_value(prev_raw.atmosphere, 6),
+        attire=_condense_scene_state_value(prev_raw.attire, 10),
+        hairstyle=_condense_scene_state_value(prev_raw.hairstyle, 7),
+        makeup=_condense_scene_state_value(prev_raw.makeup, 7),
+        skin_and_condition=_condense_scene_state_value(prev_raw.skin_and_condition, 7),
+        pose_and_action=_condense_scene_state_value(prev_raw.pose_and_action, 8),
+        pinned_fields=list(prev_raw.pinned_fields or []),
+    )
     pinned_list = ", ".join(prev.pinned_fields) if prev.pinned_fields else "None"
     turn_text = f"{user_text} {assistant_text}"
     system_prompt = (
@@ -1337,8 +1376,8 @@ async def update_scene_state(
         "1. WORLD & SCENARIO STABILITY: Carry forward location, time_and_lighting, weather, and atmosphere strictly unless the latest turn explicitly moves locations, advances time of day, or changes the weather.\n"
         "2. PINNED FIELDS MUST stay exact/verbatim from PREVIOUS STATE unless the latest turn EXPLICITLY changes them "
         "(e.g., 'get dressed for dinner', 'put on a black dress', 'take your bikini off').\n"
-        "3. Overwrite any field that DID explicitly change in the latest turn.\n"
-        "4. Keep each value to 2-6 crisp visual words (or empty string if unknown). Never invent clothes not in the turn/state.\n"
+        "3. Overwrite pose_and_action with ONLY the character's current physical pose/action in 3-6 words (never append old poses, never write prose or backstory).\n"
+        "4. Keep EVERY value to 2-7 crisp visual words (or empty string if unknown). Never invent clothes not in the turn/state.\n"
         "5. Output ONLY valid JSON with keys: location, time_and_lighting, weather, atmosphere, attire, hairstyle, makeup, skin_and_condition, pose_and_action."
     )
     user_payload = (

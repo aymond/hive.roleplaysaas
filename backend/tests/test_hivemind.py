@@ -478,6 +478,30 @@ def test_pinned_scene_state_overridden_on_explicit_change(monkeypatch) -> None:
     assert "attire" in updated.pinned_fields
 
 
+def test_scene_state_condenses_bloated_pose_and_action(monkeypatch) -> None:
+    async def fake_ollama_chat(config, messages, purpose="chat", temperature_override=None, repeat_penalty=1.18, seed=None, model_override=None):
+        return (
+            '{"location": "lantern-lit boardwalk", "time_and_lighting": "golden hour", '
+            '"weather": "clear breeze", "atmosphere": "playful", '
+            '"attire": "red bikini", "hairstyle": "loose waves", "makeup": "natural", '
+            '"skin_and_condition": "sun-kissed", '
+            '"pose_and_action": "walking slowly along the boardwalk smiling back over her shoulder while contemplating the mysteries of life and the universe forever and ever..."}'
+        )
+
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", fake_ollama_chat)
+    updated = asyncio.run(
+        update_scene_state(
+            InferenceConfig(llm_provider="ollama"),
+            SceneState(),
+            user_text="Walk ahead of me.",
+            assistant_text="*She walks slowly along the boardwalk.*",
+        )
+    )
+    assert len(updated.pose_and_action.split()) <= 8
+    assert "..." not in updated.pose_and_action
+
+
+
 
 
 
