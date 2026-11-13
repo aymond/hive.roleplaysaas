@@ -53,7 +53,7 @@ async def check_comfyui_status(base_url: str) -> dict[str, Any]:
         if fallback not in candidates:
             candidates.append(fallback)
 
-    async with httpx.AsyncClient(timeout=2.0) as client:
+    async with httpx.AsyncClient(timeout=5.0) as client:
         for url in candidates:
             try:
                 resp = await client.get(f"{url}/system_stats")
@@ -677,6 +677,7 @@ async def _run_comfyui_bridge(
 ) -> tuple[bytes | None, str]:
     status = await check_comfyui_status(config.comfyui_base_url)
     if not status["online"]:
+        logger.warning("⚠️ COMFY⏭   | ComfyUI unreachable/offline at %s — skipping ComfyUI", config.comfyui_base_url)
         return None, ""
 
     base = status.get("active_url", config.comfyui_base_url).rstrip("/")
@@ -1030,6 +1031,16 @@ async def generate_image_asset(
     img_bytes: bytes | None = None
     provider_used = "procedural_art (Apple Silicon Instant Canvas)"
 
+    logger.info(
+        "🎨 IMAGE→   | provider=%s | %dx%d | steps=%d | cfg=%.1f | seed=%d",
+        config.image_provider,
+        w,
+        h,
+        st,
+        guidance,
+        actual_seed,
+    )
+
     # 1. Try ComfyUI if configured or auto
     if config.image_provider in ("comfyui", "auto"):
         img_bytes, comfy_label = await _run_comfyui_bridge(
@@ -1069,6 +1080,12 @@ async def generate_image_asset(
 
     # 3. Fallback to Instant Procedural Concept Art Synthesizer
     if img_bytes is None:
+        logger.warning(
+            "⚠️ FALLBACK | Using procedural_art (%dx%d) — configured image_provider=%r did not produce an image",
+            w,
+            h,
+            config.image_provider,
+        )
         img_bytes = await asyncio.to_thread(
             _render_procedural_artwork,
             prompt,
