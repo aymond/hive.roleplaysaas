@@ -417,6 +417,68 @@ def test_scene_state_progression_carry_forward_and_override(monkeypatch) -> None
     assert "wet slicked-back hair" in tags
 
 
+def test_pinned_scene_state_preserved_on_unrelated_turn(monkeypatch) -> None:
+    # Even if the LLM drifts and omits/changes attire on an unrelated turn, pinned attire must stay exact.
+    async def fake_ollama_chat(config, messages, purpose="chat", temperature_override=None, repeat_penalty=1.18, seed=None, model_override=None):
+        return (
+            '{"location": "beachside bar", "time_and_lighting": "sunset", '
+            '"attire": "", "hairstyle": "loose waves", '
+            '"makeup": "natural", "skin_and_condition": "sun-kissed", '
+            '"pose_and_action": "smiling and sipping a drink"}'
+        )
+
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", fake_ollama_chat)
+
+    prev = SceneState(
+        location="Solana Cove beach",
+        attire="red bikini",
+        pinned_fields=["attire"],
+    )
+    cfg = InferenceConfig(llm_provider="ollama", ollama_model="hermes3:8b", prompt_refiner_model="llama3.2:latest")
+    updated = asyncio.run(
+        update_scene_state(
+            cfg,
+            prev,
+            user_text="Tell me a story about your last mission.",
+            assistant_text="*She smiles warmly and sips her tropical drink.*",
+        )
+    )
+    assert updated.attire == "red bikini"
+    assert "attire" in updated.pinned_fields
+    assert "(red bikini:1.2)" in format_scene_state_tags(updated)
+
+
+def test_pinned_scene_state_overridden_on_explicit_change(monkeypatch) -> None:
+    async def fake_ollama_chat(config, messages, purpose="chat", temperature_override=None, repeat_penalty=1.18, seed=None, model_override=None):
+        return (
+            '{"location": "resort restaurant", "time_and_lighting": "candlelit evening", '
+            '"attire": "black cocktail dress", "hairstyle": "updo", '
+            '"makeup": "evening makeup", "skin_and_condition": "dry", '
+            '"pose_and_action": "walking into the restaurant"}'
+        )
+
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", fake_ollama_chat)
+
+    prev = SceneState(
+        location="Solana Cove beach",
+        attire="red bikini",
+        pinned_fields=["attire"],
+    )
+    cfg = InferenceConfig(llm_provider="ollama", ollama_model="hermes3:8b", prompt_refiner_model="llama3.2:latest")
+    updated = asyncio.run(
+        update_scene_state(
+            cfg,
+            prev,
+            user_text="Let's get dressed for dinner, put on a black cocktail dress.",
+            assistant_text="*She changes into a sleek black cocktail dress and heads to the restaurant.*",
+        )
+    )
+    assert updated.attire == "black cocktail dress"
+    # Option B: stays pinned to the new value for the current scenario
+    assert "attire" in updated.pinned_fields
+
+
+
 
 
 

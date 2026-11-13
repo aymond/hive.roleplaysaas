@@ -84,6 +84,7 @@ export interface SceneState {
   makeup: string;
   skin_and_condition: string;
   pose_and_action: string;
+  pinned_fields?: string[];
 }
 
 export interface ChatSession {

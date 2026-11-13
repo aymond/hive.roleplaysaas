@@ -15,6 +15,8 @@ import {
   Download,
   Layers,
   Loader2,
+  Pin,
+  PinOff,
   RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
@@ -107,6 +109,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     makeup: '',
     skin_and_condition: '',
     pose_and_action: '',
+    pinned_fields: [],
   });
 
   // Backstory Standalone Image Generator state
@@ -148,6 +151,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
       makeup: activeSession?.scene_state?.makeup || '',
       skin_and_condition: activeSession?.scene_state?.skin_and_condition || '',
       pose_and_action: activeSession?.scene_state?.pose_and_action || '',
+      pinned_fields: activeSession?.scene_state?.pinned_fields || [],
     });
   }, [activeSession?.id, activeSession?.scene_state]);
 
@@ -324,6 +328,24 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     setSavingSceneState(true);
     try {
       const res = await api.updateChatSceneState(activeSession.id, sceneStateDraft);
+      const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
+      onChatsUpdated(nextChats);
+    } finally {
+      setSavingSceneState(false);
+    }
+  };
+
+  const handleTogglePinField = async (field: string) => {
+    if (!activeSession || savingSceneState) return;
+    const currentPinned = sceneStateDraft.pinned_fields || [];
+    const nextPinned = currentPinned.includes(field)
+      ? currentPinned.filter((f) => f !== field)
+      : [...currentPinned, field];
+    const nextDraft: SceneState = { ...sceneStateDraft, pinned_fields: nextPinned };
+    setSceneStateDraft(nextDraft);
+    setSavingSceneState(true);
+    try {
+      const res = await api.updateChatSceneState(activeSession.id, nextDraft);
       const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
       onChatsUpdated(nextChats);
     } finally {
@@ -1273,22 +1295,61 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                   ['skin_and_condition', 'Skin & Condition', 'e.g. wet glistening skin, sun-kissed dry skin'],
                   ['pose_and_action', 'Pose & Action', 'e.g. walking away along shoreline'],
                 ] as const
-              ).map(([field, label, placeholder]) => (
-                <div key={field} className="space-y-1">
-                  <label className="block text-[11px] font-semibold text-slate-300">
-                    {label}
-                  </label>
-                  <input
-                    type="text"
-                    value={sceneStateDraft[field]}
-                    onChange={(e) =>
-                      setSceneStateDraft((prev) => ({ ...prev, [field]: e.target.value }))
-                    }
-                    placeholder={placeholder}
-                    className="w-full rounded-lg bg-[#090c14] border border-white/15 px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              ))}
+              ).map(([field, label, placeholder]) => {
+                const isPinned = (sceneStateDraft.pinned_fields || []).includes(field);
+                return (
+                  <div
+                    key={field}
+                    className={`space-y-1 p-2 rounded-xl border transition ${
+                      isPinned
+                        ? 'bg-amber-500/10 border-amber-400/40'
+                        : 'bg-transparent border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="block text-[11px] font-semibold text-slate-300">
+                        {label}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePinField(field)}
+                        disabled={savingSceneState || !activeSession}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition ${
+                          isPinned
+                            ? 'bg-amber-500/25 text-amber-200 border border-amber-400/40'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 border border-white/10'
+                        }`}
+                        title={
+                          isPinned
+                            ? 'Pinned across turns (auto-updates only if explicitly changed in chat). Click to unpin.'
+                            : 'Pin this field to keep it across future turns unless explicitly changed.'
+                        }
+                      >
+                        {isPinned ? (
+                          <>
+                            <Pin className="w-3 h-3" />
+                            Pinned
+                          </>
+                        ) : (
+                          <>
+                            <PinOff className="w-3 h-3" />
+                            Pin
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={sceneStateDraft[field]}
+                      onChange={(e) =>
+                        setSceneStateDraft((prev) => ({ ...prev, [field]: e.target.value }))
+                      }
+                      placeholder={placeholder}
+                      className="w-full rounded-lg bg-[#090c14] border border-white/15 px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                );
+              })}
             </form>
           </div>
         ) : (

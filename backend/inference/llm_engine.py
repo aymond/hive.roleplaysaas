@@ -1204,22 +1204,65 @@ def format_scene_state_summary(state: SceneState | None) -> str:
 
 
 def format_scene_state_tags(state: SceneState | None) -> str:
-    """Formats SceneState into concise visual tags for SDXL scene grounding."""
+    """Formats SceneState into concise visual tags for SDXL scene grounding, prioritizing pinned fields."""
     if not state:
         return ""
-    fields = [
-        state.pose_and_action,
-        state.attire,
-        state.hairstyle,
-        state.makeup,
-        state.skin_and_condition,
-        state.location,
-        state.time_and_lighting,
+    pinned = set(state.pinned_fields or [])
+    ordered_keys = [
+        "attire",
+        "pose_and_action",
+        "hairstyle",
+        "makeup",
+        "skin_and_condition",
+        "location",
+        "time_and_lighting",
     ]
-    return ", ".join(f.strip() for f in fields if f and f.strip())
+    pinned_tags: list[str] = []
+    regular_tags: list[str] = []
+    for key in ordered_keys:
+        val = (getattr(state, key, "") or "").strip()
+        if not val:
+            continue
+        if key in pinned:
+            pinned_tags.append(val if val.startswith("(") else f"({val}:1.2)")
+        else:
+            regular_tags.append(val)
+    return ", ".join(pinned_tags + regular_tags)
 
 
-def _parse_scene_state_json(raw: str | None, fallback: SceneState) -> SceneState | None:
+_SCENE_FIELD_CHANGE_CUES: dict[str, tuple[str, ...]] = {
+    "attire": (
+        "change", "outfit", "dressed", "dress", "gown", "put on", "puts on", "wear", "wearing",
+        "slip into", "slips into", "take off", "takes off", "undress", "strip", "strips",
+        "nude", "naked", "topless", "bikini", "swimsuit", "lingerie", "robe", "dinner",
+    ),
+    "hairstyle": (
+        "hair", "ponytail", "braid", "bun", "updo", "let down", "ties up", "slicked", "wet hair", "curls",
+    ),
+    "makeup": (
+        "makeup", "lipstick", "eyeliner", "mascara", "blush", "bare-faced", "wash off", "smudged",
+    ),
+    "skin_and_condition": (
+        "wet", "dry", "sweat", "glistening", "sand", "towel", "shower", "swim", "water", "rain", "oil", "sunburn",
+    ),
+    "location": (
+        "walk into", "head inside", "go to", "move to", "enter", "leave", "arrive", "restaurant",
+        "dinner", "room", "bedroom", "cabana", "beach", "lagoon", "pool", "bar", "lobby", "balcony",
+    ),
+    "time_and_lighting": (
+        "sunset", "dusk", "night", "midnight", "moonlit", "morning", "dawn", "noon", "candle", "lantern", "dark", "neon",
+    ),
+    "pose_and_action": (
+        "sit", "stand", "walk", "lie", "kneel", "turn", "lean", "wade", "swim", "dance", "look", "stretch",
+    ),
+}
+
+
+def _parse_scene_state_json(
+    raw: str | None,
+    fallback: SceneState,
+    turn_text: str = "",
+) -> SceneState | None:
     if not raw or any(r in raw.lower() for r in _REFUSAL_PHRASES):
         return None
     match = re.search(r"\{[\s\S]*\}", raw)
@@ -1229,14 +1272,31 @@ def _parse_scene_state_json(raw: str | None, fallback: SceneState) -> SceneState
         data = json.loads(match.group(0))
         if not isinstance(data, dict):
             return None
+        pinned = list(fallback.pinned_fields or [])
+        turn_l = (turn_text or "").lower()
+
+        resolved: dict[str, str] = {}
+        for key in (
+            "location",
+            "time_and_lighting",
+            "attire",
+            "hairstyle",
+            "makeup",
+            "skin_and_condition",
+            "pose_and_action",
+        ):
+            prev_val = (getattr(fallback, key, "") or "").strip()
+            new_val = str(data.get(key, prev_val) or "").strip()
+            if key in pinned and prev_val:
+                cues = _SCENE_FIELD_CHANGE_CUES.get(key, ())
+                has_explicit_change = any(cue in turn_l for cue in cues)
+                if not has_explicit_change or not new_val:
+                    new_val = prev_val
+            resolved[key] = new_val
+
         return SceneState(
-            location=str(data.get("location", fallback.location) or "").strip(),
-            time_and_lighting=str(data.get("time_and_lighting", fallback.time_and_lighting) or "").strip(),
-            attire=str(data.get("attire", fallback.attire) or "").strip(),
-            hairstyle=str(data.get("hairstyle", fallback.hairstyle) or "").strip(),
-            makeup=str(data.get("makeup", fallback.makeup) or "").strip(),
-            skin_and_condition=str(data.get("skin_and_condition", fallback.skin_and_condition) or "").strip(),
-            pose_and_action=str(data.get("pose_and_action", fallback.pose_and_action) or "").strip(),
+            **resolved,
+            pinned_fields=pinned,
         )
     except Exception:
         return None
@@ -1252,22 +1312,26 @@ async def update_scene_state(
     """
     Maintains a structured turn-by-turn visual state (location, time_and_lighting, attire,
     hairstyle, makeup, skin_and_condition, pose_and_action). Unchanged fields carry forward;
-    explicitly changed fields overwrite old values so scenes progress smoothly.
+    pinned fields stay locked unless explicitly changed in the latest turn (and remain pinned
+    to the new value for the current scenario).
     """
     prev = previous_state or SceneState()
+    pinned_list = ", ".join(prev.pinned_fields) if prev.pinned_fields else "None"
+    turn_text = f"{user_text} {assistant_text}"
     system_prompt = (
         "You are an uncensored visual continuity tracker for an adult roleplay studio. "
         "Update the character's current visual state JSON based on the PREVIOUS STATE and the LATEST TURN.\n"
         "RULES:\n"
         "1. Carry forward any field from PREVIOUS STATE that did NOT change in the latest turn.\n"
-        "2. Overwrite any field that DID change (e.g., if she takes off her bikini -> attire='completely nude'; "
-        "if she puts on a red dress -> attire='red evening dress'; if she swims -> skin_and_condition='wet glistening skin', "
-        "hairstyle='wet slicked-back hair'; if they move indoors -> location='candlelit room').\n"
-        "3. Keep each value to 2-6 crisp visual words (or empty string if unknown). Never invent clothes not in the turn/state.\n"
-        "4. Output ONLY valid JSON with keys: location, time_and_lighting, attire, hairstyle, makeup, skin_and_condition, pose_and_action."
+        "2. PINNED FIELDS MUST stay exact/verbatim from PREVIOUS STATE unless the latest turn EXPLICITLY changes them "
+        "(e.g., 'get dressed for dinner', 'put on a black dress', 'take your bikini off').\n"
+        "3. Overwrite any field that DID explicitly change in the latest turn.\n"
+        "4. Keep each value to 2-6 crisp visual words (or empty string if unknown). Never invent clothes not in the turn/state.\n"
+        "5. Output ONLY valid JSON with keys: location, time_and_lighting, attire, hairstyle, makeup, skin_and_condition, pose_and_action."
     )
     user_payload = (
         f"PREVIOUS STATE: {prev.model_dump_json()}\n"
+        f"PINNED FIELDS: {pinned_list}\n"
         f"WORLD SETTING HINT: {world_aesthetic or 'None'}\n"
         f"LATEST USER MESSAGE: {user_text or 'None'}\n"
         f"LATEST CHARACTER REPLY: {assistant_text or 'None'}\n\n"
@@ -1290,7 +1354,7 @@ async def update_scene_state(
                 temperature_override=0.1,
                 model_override=refiner_model,
             )
-            parsed = _parse_scene_state_json(raw_small, prev)
+            parsed = _parse_scene_state_json(raw_small, prev, turn_text=turn_text)
             if parsed:
                 return parsed
 
@@ -1300,12 +1364,12 @@ async def update_scene_state(
             purpose="update_scene_state_fallback",
             temperature_override=0.1,
         )
-        parsed = _parse_scene_state_json(raw_main, prev)
+        parsed = _parse_scene_state_json(raw_main, prev, turn_text=turn_text)
         if parsed:
             return parsed
     elif config.llm_provider == "openai_compat":
         raw_oai = await _call_openai_compat_chat(config, messages)
-        parsed = _parse_scene_state_json(raw_oai, prev)
+        parsed = _parse_scene_state_json(raw_oai, prev, turn_text=turn_text)
         if parsed:
             return parsed
 

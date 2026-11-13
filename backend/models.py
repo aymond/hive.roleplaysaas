@@ -99,6 +99,7 @@ class SceneState(BaseModel):
     makeup: str = ""
     skin_and_condition: str = ""
     pose_and_action: str = ""
+    pinned_fields: list[str] = Field(default_factory=list)
 
 
 class ChatSession(BaseModel):
