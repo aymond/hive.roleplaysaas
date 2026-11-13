@@ -173,7 +173,7 @@ class InferenceConfig(BaseModel):
     mps_use_fp16: bool = True
     mps_attention_slicing: bool = True
     comfyui_base_url: str = "http://127.0.0.1:8188"
-    comfyui_checkpoint: str = "DreamShaperXL_Turbo_v2_1.safetensors"
+    comfyui_checkpoint: str = "CyberRealisticPony_V18.0_F16.safetensors"
     comfyui_render_mode: Literal[
         "hybrid_refiner",
         "single_stylized",

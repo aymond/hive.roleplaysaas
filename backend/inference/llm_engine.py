@@ -323,6 +323,12 @@ def clean_character_visual_tags_for_scene(visual_tags: str, scene_text: str) -> 
             "sheet",
             "skin",
             "breasts",
+            "nipple",
+            "labia",
+            "vulva",
+            "pussy",
+            "clit",
+            "vagina",
             "thighs",
             "full body",
         )
@@ -348,6 +354,162 @@ def clean_character_visual_tags_for_scene(visual_tags: str, scene_text: str) -> 
         filtered.append(seg)
 
     return ", ".join(filtered)
+
+
+def build_anatomical_and_clothing_overrides(
+    scene_text: str,
+    distilled_keywords: str = "",
+) -> tuple[str, str, str]:
+    """
+    Detects explicit nudity / breast / vulva / labia requests in the active turn or distilled tags
+    and returns:
+      (weighted_positive_boost_tags, cleaned_distilled_keywords, negative_clothing_blockers)
+    so that Pony / SDXL models strictly obey anatomical requests without defaulting back to bikinis/crops.
+    """
+    combined = f"{scene_text} {distilled_keywords}".lower()
+
+    wants_lower_nudity = any(
+        k in combined
+        for k in (
+            "labia",
+            "vulva",
+            "pussy",
+            "vagina",
+            "clit",
+            "clitoris",
+            "cleft of venus",
+            "spread legs",
+            "spreading legs",
+            "spread her legs",
+            "between her legs",
+            "pubic",
+        )
+    )
+    wants_upper_nudity = any(
+        k in combined
+        for k in (
+            "breast",
+            "breasts",
+            "nipple",
+            "nipples",
+            "areola",
+            "topless",
+            "bare chest",
+            "expose",
+            "exposing",
+            "unclasp",
+            "pulls down top",
+            "slides off top",
+        )
+    )
+    wants_full_nudity = any(
+        k in combined
+        for k in (
+            "nude",
+            "naked",
+            "nudist",
+            "undress",
+            "strips",
+            "slipping off",
+            "slips off",
+            "without clothes",
+            "bare skin",
+        )
+    )
+
+    pos_boosts: list[str] = []
+    neg_blockers: list[str] = []
+
+    if wants_lower_nudity:
+        pos_boosts.extend(
+            [
+                "(nsfw, uncensored, completely nude, naked:1.35)",
+                "(pussy, detailed vulva, labia, cleft of venus:1.4)",
+                "(spread legs, open thighs, full body, lower body focus:1.3)",
+            ]
+        )
+        neg_blockers.extend(
+            [
+                "clothed",
+                "bikini",
+                "swimsuit",
+                "swimwear",
+                "panties",
+                "underwear",
+                "bottoms",
+                "shorts",
+                "skirt",
+                "dress",
+                "covered pussy",
+                "censored",
+                "mosaic censorship",
+                "bar censor",
+                "close-up face portrait",
+            ]
+        )
+
+    if wants_upper_nudity:
+        if not wants_lower_nudity:
+            pos_boosts.append("(nsfw, uncensored, topless, nude:1.3)")
+        pos_boosts.append("(bare breasts, exposed breasts, detailed nipples, areolae:1.35)")
+        if not wants_lower_nudity:
+            pos_boosts.append("(cowboy shot, upper body and waist visible:1.2)")
+        neg_blockers.extend(
+            [
+                "bra",
+                "bikini top",
+                "swimsuit",
+                "covered breasts",
+                "covered nipples",
+                "pasties",
+                "dress",
+                "shirt",
+                "clothed",
+                "censored",
+            ]
+        )
+
+    if wants_full_nudity and not (wants_lower_nudity or wants_upper_nudity):
+        pos_boosts.extend(
+            [
+                "(nsfw, uncensored, completely nude, naked:1.3)",
+                "(bare breasts, nipples, pussy, full body:1.25)",
+            ]
+        )
+        neg_blockers.extend(
+            [
+                "clothed",
+                "bikini",
+                "swimsuit",
+                "swimwear",
+                "underwear",
+                "bra",
+                "panties",
+                "dress",
+                "towel",
+                "censored",
+            ]
+        )
+
+    # If the user wants nudity/exposed anatomy, strip any lingering 'bikini'/'dress'/'swimsuit' words
+    # from the LLM-distilled keywords so CLIP doesn't draw a bikini anyway
+    cleaned_kw = distilled_keywords
+    if wants_lower_nudity or wants_upper_nudity or wants_full_nudity:
+        filtered_tags: list[str] = []
+        for tag in distilled_keywords.split(","):
+            t_clean = tag.strip()
+            t_low = t_clean.lower()
+            if any(
+                cloth in t_low
+                for cloth in ("bikini", "swimsuit", "sundress", "dress", "linen", "clothed", "bra", "panties")
+            ):
+                continue
+            if t_clean:
+                filtered_tags.append(t_clean)
+        cleaned_kw = ", ".join(filtered_tags)
+
+    dedup_neg = ", ".join(dict.fromkeys(neg_blockers))
+    return ", ".join(pos_boosts), cleaned_kw, dedup_neg
 
 
 _PROSE_STOPWORDS = {
@@ -555,6 +717,11 @@ async def build_contextual_scene_prompt(
         lore_visuals=lore_visuals,
     )
 
+    anat_boost, cleaned_distilled_kw, _ = build_anatomical_and_clothing_overrides(
+        scene_text=f"{user_intent} {char_actions or target_msg.content} {scenario_text}",
+        distilled_keywords=distilled_keywords,
+    )
+
     is_pony = "pony" in (config.comfyui_checkpoint or "").lower()
     active_mode = render_mode_override or getattr(config, "comfyui_render_mode", "hybrid_refiner")
 
@@ -577,10 +744,11 @@ async def build_contextual_scene_prompt(
             "soft painterly skin glow, romantic atmosphere, 8k"
         )
 
-    # Front-load the distilled action/body/nudity keywords FIRST so CLIP prioritizes the active pose & nudity!
+    # Front-load weighted anatomical boost tags + distilled action keywords FIRST so CLIP prioritizes the active pose & nudity!
     prompt_parts = [
         quality_prefix,
-        distilled_keywords,
+        anat_boost,
+        cleaned_distilled_kw,
         physical_traits,
         style_suffix,
     ]

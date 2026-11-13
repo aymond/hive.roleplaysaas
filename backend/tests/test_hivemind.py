@@ -5,6 +5,7 @@ from pathlib import Path
 
 from backend.inference.image_engine import _render_procedural_artwork, get_apple_silicon_telemetry
 from backend.inference.llm_engine import (
+    build_anatomical_and_clothing_overrides,
     build_contextual_scene_prompt,
     clean_character_visual_tags_for_scene,
     distill_narrative_to_sdxl_keywords,
@@ -234,6 +235,20 @@ def test_contextual_scene_prompt_extraction() -> None:
         )
     )
     assert "raw photo" in raw_mode_prompt
+
+    # Verify explicit anatomical booster & clothing negative blocker
+    pos_boost, cleaned_kw, neg_block = build_anatomical_and_clothing_overrides(
+        scene_text="exposing her breasts and showing labia on the beach",
+        distilled_keywords="red bikini, sundress, sunset waves, arching back",
+    )
+    assert "pussy, detailed vulva, labia" in pos_boost
+    assert "bare breasts, exposed breasts, detailed nipples" in pos_boost
+    assert "red bikini" not in cleaned_kw
+    assert "sundress" not in cleaned_kw
+    assert "sunset waves" in cleaned_kw
+    assert "bikini" in neg_block
+    assert "covered pussy" in neg_block
+
 
 
 

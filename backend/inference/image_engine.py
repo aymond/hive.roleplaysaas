@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from ..logger import logger
 from ..models import InferenceConfig
+from .llm_engine import build_anatomical_and_clothing_overrides
 
 try:
     import torch
@@ -467,10 +468,14 @@ async def _run_comfyui_bridge(
     )
 
     is_pony_primary = "pony" in ckpt_to_use.lower()
-    neg_text = (
+    base_neg = (
         negative_prompt
         or "score_4, score_5, score_6, blurry, low quality, flat lighting, washed out, oversaturated, burnt face, red nose, clown makeup, deformed, bad anatomy"
     )
+    _, _, neg_clothing_blockers = build_anatomical_and_clothing_overrides(prompt)
+    neg_text = f"{base_neg}, {neg_clothing_blockers}" if neg_clothing_blockers else base_neg
+    if is_pony_primary and "score_4" not in neg_text:
+        neg_text = f"score_4, score_5, score_6, {neg_text}"
 
     if use_hybrid:
         # Stage 1 (Uncensored Pose & Anatomy on Primary Model, e.g. CyberRealisticPony) ->

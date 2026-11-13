@@ -16,6 +16,7 @@ from .inference.image_engine import (
     get_apple_silicon_telemetry,
 )
 from .inference.llm_engine import (
+    build_anatomical_and_clothing_overrides,
     build_contextual_scene_prompt,
     check_ollama_status,
     check_openai_compat_status,
@@ -879,6 +880,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
 
     # 3. Distill Scenario & Lore into concise SDXL visual keywords and put BEFORE static character traits
     llm_provider_used = None
+    distilled_kw = ""
     if scenario_to_distill or lore_visuals_to_distill or req.use_llm_director:
         if req.use_llm_director or scenario_to_distill:
             distilled_kw, llm_provider_used = await distill_narrative_to_sdxl_keywords(
@@ -888,10 +890,17 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
                 user_intent_text=req.custom_prompt.strip(),
                 lore_visuals=lore_visuals_to_distill,
             )
-            if distilled_kw:
-                prompt_segments.append(distilled_kw)
         elif lore_visuals_to_distill:
-            prompt_segments.append(lore_visuals_to_distill)
+            distilled_kw = lore_visuals_to_distill
+
+    anat_boost, cleaned_distilled_kw, _ = build_anatomical_and_clothing_overrides(
+        scene_text=f"{req.custom_prompt} {scenario_to_distill}",
+        distilled_keywords=distilled_kw,
+    )
+    if anat_boost:
+        prompt_segments.append(anat_boost)
+    if cleaned_distilled_kw:
+        prompt_segments.append(cleaned_distilled_kw)
 
     # 4. Character visual prompt tags & physical beauty traits (cleaned of conflicting static clothing / portrait crop)
     if req.include_character_visuals and card:
