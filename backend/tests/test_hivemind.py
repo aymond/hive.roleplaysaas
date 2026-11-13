@@ -14,11 +14,13 @@ from backend.inference.llm_engine import (
     distill_situation_checkpoint,
     extract_action_and_scene_beats,
     fallback_extract_sdxl_keywords,
+    format_scene_state_tags,
     harmonize_sdxl_prompt,
+    update_scene_state,
 )
 from backend.lore_engine import scan_lorebook
 from backend.main import app
-from backend.models import CharacterCard, ChatMessage, InferenceConfig
+from backend.models import CharacterCard, ChatMessage, InferenceConfig, SceneState
 from backend.storage import StudioStorage
 from backend.tavern_card import decode_tavern_png, encode_tavern_png
 from backend.workflow_runner import execute_workflow_graph
@@ -378,6 +380,42 @@ def test_situation_checkpoint_distillation_and_prompt_injection(monkeypatch) -> 
     sys_prompt = build_tavern_system_prompt(char, lore_context="", situation_checkpoint=checkpoint)
     assert "### Current Situation Checkpoint" in sys_prompt
     assert "candlelit teakwood cabana" in sys_prompt
+
+
+def test_scene_state_progression_carry_forward_and_override(monkeypatch) -> None:
+    async def fake_ollama_chat(config, messages, purpose="chat", temperature_override=None, repeat_penalty=1.18, seed=None, model_override=None):
+        return (
+            '{"location": "turquoise lagoon", "time_and_lighting": "golden hour sunset", '
+            '"attire": "string bikini", "hairstyle": "wet slicked-back hair", '
+            '"makeup": "natural bare-faced", "skin_and_condition": "wet glistening skin", '
+            '"pose_and_action": "wading waist-deep in water"}'
+        )
+
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", fake_ollama_chat)
+
+    prev = SceneState(
+        location="Solana Cove beach",
+        time_and_lighting="golden hour sunset",
+        attire="string bikini",
+        hairstyle="loose tousled hair",
+        makeup="natural bare-faced",
+    )
+    cfg = InferenceConfig(llm_provider="ollama", ollama_model="hermes3:8b", prompt_refiner_model="llama3.2:latest")
+    updated = asyncio.run(
+        update_scene_state(
+            cfg,
+            prev,
+            user_text="Wade into the lagoon with me.",
+            assistant_text="*She wades waist-deep into the turquoise lagoon, her wet hair slicked back.*",
+        )
+    )
+    assert updated.attire == "string bikini"
+    assert updated.hairstyle == "wet slicked-back hair"
+    assert updated.skin_and_condition == "wet glistening skin"
+    tags = format_scene_state_tags(updated)
+    assert "string bikini" in tags
+    assert "wet slicked-back hair" in tags
+
 
 
 

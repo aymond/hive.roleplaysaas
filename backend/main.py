@@ -26,6 +26,7 @@ from .inference.llm_engine import (
     fallback_extract_sdxl_keywords,
     generate_roleplay_reply,
     harmonize_sdxl_prompt,
+    update_scene_state,
 )
 from .logger import logger, set_hivemind_log_level
 from .lore_engine import replace_tavern_macros, scan_lorebook
@@ -36,6 +37,7 @@ from .models import (
     GalleryAsset,
     InferenceConfig,
     Lorebook,
+    SceneState,
     WorkflowGraph,
     utc_now_iso,
 )
@@ -553,6 +555,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         user_name=session.user_persona_name,
         user_desc=session.user_persona_desc,
         situation_checkpoint=session.situation_checkpoint,
+        scene_state=session.scene_state,
     )
 
     assistant_msg = ChatMessage(
@@ -565,6 +568,14 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     )
     session.messages.append(assistant_msg)
 
+    session.scene_state = await update_scene_state(
+        config=storage.config,
+        previous_state=session.scene_state,
+        user_text=req.content,
+        assistant_text=reply_text,
+        world_aesthetic=world.aesthetic_style if world else "",
+    )
+
     if req.illustrate_scene:
         image_prompt = await build_contextual_scene_prompt(
             config=storage.config,
@@ -575,6 +586,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
             user_name=session.user_persona_name,
             user_desc=session.user_persona_desc,
             situation_checkpoint=session.situation_checkpoint,
+            scene_state=session.scene_state,
         )
         img_meta = await generate_image_asset(
             config=storage.config,
@@ -665,6 +677,7 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
         user_desc=session.user_persona_desc,
         variation_index=variation_idx,
         situation_checkpoint=session.situation_checkpoint,
+        scene_state=session.scene_state,
     )
     target_msg.swipes.append(new_reply)
     target_msg.active_swipe = len(target_msg.swipes) - 1
@@ -724,6 +737,7 @@ async def illustrate_chat_message(
             user_name=session.user_persona_name,
             user_desc=session.user_persona_desc,
             situation_checkpoint=session.situation_checkpoint,
+            scene_state=session.scene_state,
         )
 
     img_meta = await generate_image_asset(
@@ -766,6 +780,17 @@ async def update_chat_checkpoint(chat_id: str, req: CheckpointRequest) -> dict[s
     elif req.refresh:
         await _maybe_update_chat_checkpoint(session, card, force=True)
 
+    session.updated_at = utc_now_iso()
+    storage.save()
+    return {"session": session.model_dump()}
+
+
+@app.post("/api/chats/{chat_id}/scene-state")
+async def update_chat_scene_state(chat_id: str, state: SceneState) -> dict[str, Any]:
+    session = storage.chats.get(chat_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    session.scene_state = state
     session.updated_at = utc_now_iso()
     storage.save()
     return {"session": session.model_dump()}

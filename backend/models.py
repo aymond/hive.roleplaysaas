@@ -91,6 +91,16 @@ class ChatMessage(BaseModel):
     created_at: str = Field(default_factory=utc_now_iso)
 
 
+class SceneState(BaseModel):
+    location: str = ""
+    time_and_lighting: str = ""
+    attire: str = ""
+    hairstyle: str = ""
+    makeup: str = ""
+    skin_and_condition: str = ""
+    pose_and_action: str = ""
+
+
 class ChatSession(BaseModel):
     id: str = Field(default_factory=lambda: new_id("chat"))
     title: str
@@ -101,6 +111,7 @@ class ChatSession(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
     situation_checkpoint: str = ""
     checkpoint_msg_count: int = 0
+    scene_state: SceneState = Field(default_factory=SceneState)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
 

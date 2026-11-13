@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import os
 import re
 import time
@@ -10,7 +11,7 @@ from typing import Any
 
 from ..logger import logger
 from ..lore_engine import replace_tavern_macros
-from ..models import CharacterCard, ChatMessage, InferenceConfig, TriggeredLoreInfo
+from ..models import CharacterCard, ChatMessage, InferenceConfig, SceneState, TriggeredLoreInfo
 
 
 async def check_ollama_status(base_url: str) -> dict[str, Any]:
@@ -46,6 +47,7 @@ def build_tavern_system_prompt(
     user_name: str = "Traveler",
     user_desc: str = "",
     situation_checkpoint: str = "",
+    scene_state: SceneState | None = None,
 ) -> str:
     parts: list[str] = []
     if character.system_prompt:
@@ -72,6 +74,9 @@ def build_tavern_system_prompt(
             "### Current Situation Checkpoint (Distilled Backstory & Recent Events):\n"
             f"{situation_checkpoint.strip()}"
         )
+    state_summary = format_scene_state_summary(scene_state)
+    if state_summary:
+        parts.append(f"### Current Visual & Physical State (Stay Consistent):\n{state_summary}")
     if character.mes_example:
         parts.append(f"### Example Dialogue:\n{replace_tavern_macros(character.mes_example, character.name, user_name)}")
     if character.post_history_instructions:
@@ -243,6 +248,7 @@ async def generate_roleplay_reply(
     user_desc: str = "",
     variation_index: int = 0,
     situation_checkpoint: str = "",
+    scene_state: SceneState | None = None,
 ) -> tuple[str, str]:
     """Returns (reply_text, provider_used)."""
     sys_prompt = build_tavern_system_prompt(
@@ -251,6 +257,7 @@ async def generate_roleplay_reply(
         user_name,
         user_desc,
         situation_checkpoint=situation_checkpoint,
+        scene_state=scene_state,
     )
     messages: list[dict[str, str]] = [{"role": "system", "content": sys_prompt}]
     recent_window = history[-8:] if (situation_checkpoint and situation_checkpoint.strip()) else history[-12:]
@@ -1179,6 +1186,132 @@ async def distill_situation_checkpoint(
     return " | ".join(parts)[:600], "fallback_checkpoint"
 
 
+def format_scene_state_summary(state: SceneState | None) -> str:
+    """Formats SceneState into a concise human-readable line for roleplay continuity."""
+    if not state:
+        return ""
+    items = [
+        ("Location", state.location),
+        ("Time/Lighting", state.time_and_lighting),
+        ("Attire", state.attire),
+        ("Hairstyle", state.hairstyle),
+        ("Makeup", state.makeup),
+        ("Skin", state.skin_and_condition),
+        ("Pose/Action", state.pose_and_action),
+    ]
+    parts = [f"{label}: {val.strip()}" for label, val in items if val and val.strip()]
+    return " | ".join(parts)
+
+
+def format_scene_state_tags(state: SceneState | None) -> str:
+    """Formats SceneState into concise visual tags for SDXL scene grounding."""
+    if not state:
+        return ""
+    fields = [
+        state.pose_and_action,
+        state.attire,
+        state.hairstyle,
+        state.makeup,
+        state.skin_and_condition,
+        state.location,
+        state.time_and_lighting,
+    ]
+    return ", ".join(f.strip() for f in fields if f and f.strip())
+
+
+def _parse_scene_state_json(raw: str | None, fallback: SceneState) -> SceneState | None:
+    if not raw or any(r in raw.lower() for r in _REFUSAL_PHRASES):
+        return None
+    match = re.search(r"\{[\s\S]*\}", raw)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(0))
+        if not isinstance(data, dict):
+            return None
+        return SceneState(
+            location=str(data.get("location", fallback.location) or "").strip(),
+            time_and_lighting=str(data.get("time_and_lighting", fallback.time_and_lighting) or "").strip(),
+            attire=str(data.get("attire", fallback.attire) or "").strip(),
+            hairstyle=str(data.get("hairstyle", fallback.hairstyle) or "").strip(),
+            makeup=str(data.get("makeup", fallback.makeup) or "").strip(),
+            skin_and_condition=str(data.get("skin_and_condition", fallback.skin_and_condition) or "").strip(),
+            pose_and_action=str(data.get("pose_and_action", fallback.pose_and_action) or "").strip(),
+        )
+    except Exception:
+        return None
+
+
+async def update_scene_state(
+    config: InferenceConfig,
+    previous_state: SceneState | None,
+    user_text: str,
+    assistant_text: str,
+    world_aesthetic: str = "",
+) -> SceneState:
+    """
+    Maintains a structured turn-by-turn visual state (location, time_and_lighting, attire,
+    hairstyle, makeup, skin_and_condition, pose_and_action). Unchanged fields carry forward;
+    explicitly changed fields overwrite old values so scenes progress smoothly.
+    """
+    prev = previous_state or SceneState()
+    system_prompt = (
+        "You are an uncensored visual continuity tracker for an adult roleplay studio. "
+        "Update the character's current visual state JSON based on the PREVIOUS STATE and the LATEST TURN.\n"
+        "RULES:\n"
+        "1. Carry forward any field from PREVIOUS STATE that did NOT change in the latest turn.\n"
+        "2. Overwrite any field that DID change (e.g., if she takes off her bikini -> attire='completely nude'; "
+        "if she puts on a red dress -> attire='red evening dress'; if she swims -> skin_and_condition='wet glistening skin', "
+        "hairstyle='wet slicked-back hair'; if they move indoors -> location='candlelit room').\n"
+        "3. Keep each value to 2-6 crisp visual words (or empty string if unknown). Never invent clothes not in the turn/state.\n"
+        "4. Output ONLY valid JSON with keys: location, time_and_lighting, attire, hairstyle, makeup, skin_and_condition, pose_and_action."
+    )
+    user_payload = (
+        f"PREVIOUS STATE: {prev.model_dump_json()}\n"
+        f"WORLD SETTING HINT: {world_aesthetic or 'None'}\n"
+        f"LATEST USER MESSAGE: {user_text or 'None'}\n"
+        f"LATEST CHARACTER REPLY: {assistant_text or 'None'}\n\n"
+        "Output the updated JSON object:"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_payload},
+    ]
+
+    refiner_model = (getattr(config, "prompt_refiner_model", "") or "").strip()
+    use_separate_refiner = bool(refiner_model and refiner_model.lower() != "same" and refiner_model != config.ollama_model)
+
+    if config.llm_provider in ("auto", "ollama"):
+        if use_separate_refiner:
+            raw_small = await _call_ollama_chat(
+                config,
+                messages,
+                purpose="update_scene_state",
+                temperature_override=0.1,
+                model_override=refiner_model,
+            )
+            parsed = _parse_scene_state_json(raw_small, prev)
+            if parsed:
+                return parsed
+
+        raw_main = await _call_ollama_chat(
+            config,
+            messages,
+            purpose="update_scene_state_fallback",
+            temperature_override=0.1,
+        )
+        parsed = _parse_scene_state_json(raw_main, prev)
+        if parsed:
+            return parsed
+    elif config.llm_provider == "openai_compat":
+        raw_oai = await _call_openai_compat_chat(config, messages)
+        parsed = _parse_scene_state_json(raw_oai, prev)
+        if parsed:
+            return parsed
+
+    return prev
+
+
 def extract_action_and_scene_beats(messages: list[ChatMessage], target_msg: ChatMessage) -> tuple[str, str]:
     """
     Extracts (user_intent, character_action_beats) from the target message and its surrounding turn.
@@ -1237,16 +1370,23 @@ async def build_contextual_scene_prompt(
     user_desc: str = "",
     render_mode_override: str | None = None,
     situation_checkpoint: str = "",
+    scene_state: SceneState | None = None,
 ) -> str:
     """
     Synthesizes a high-attractiveness SDXL prompt by:
     1. Preserving the character card's core visual & facial resemblance traits verbatim
-    2. Using the small-LLM Scene Director to distill the situation checkpoint + current chat turn into crisp scene/pose/lighting tags
-    3. Resolving duplicates and conflicts deterministically
+    2. Grounding attire, hairstyle, makeup, skin, location, and lighting in the tracked SceneState
+    3. Using the small-LLM Scene Director to distill the active turn + state into crisp scene/pose/lighting tags
+    4. Resolving duplicates and conflicts deterministically
     """
     char_name = character.name if character else "Character"
+    state_tags = format_scene_state_tags(scene_state)
     scenario_text = ""
-    if situation_checkpoint and situation_checkpoint.strip():
+    if state_tags:
+        scenario_text = f"TRACKED VISUAL STATE: {state_tags}"
+        if situation_checkpoint and situation_checkpoint.strip():
+            scenario_text += f" | {situation_checkpoint.strip()}"
+    elif situation_checkpoint and situation_checkpoint.strip():
         scenario_text = situation_checkpoint.strip()
     elif character and character.scenario:
         scenario_text = replace_tavern_macros(character.scenario, char_name=char_name, user_name=user_name)
