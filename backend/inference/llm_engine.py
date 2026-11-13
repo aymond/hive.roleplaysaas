@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
+import os
 import re
 import time
 import httpx
@@ -76,6 +78,9 @@ async def _call_ollama_chat(
     config: InferenceConfig,
     messages: list[dict[str, str]],
     purpose: str = "chat",
+    temperature_override: float | None = None,
+    repeat_penalty: float = 1.18,
+    seed: int | None = None,
 ) -> str | None:
     status = await check_ollama_status(config.ollama_base_url)
     if not status["online"] or not status["models"]:
@@ -92,12 +97,15 @@ async def _call_ollama_chat(
             hermes_match = next((m for m in available if "hermes" in m.lower()), None)
             model_to_use = hermes_match or available[0]
     t0 = time.perf_counter()
+    temp = temperature_override if temperature_override is not None else config.temperature
+    call_seed = seed if seed is not None else int.from_bytes(os.urandom(4), "big")
     last_user = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
     logger.info(
-        "🤖 OLLAMA→  | purpose=%s | model=%s | temp=%.2f | input=%r",
+        "🤖 OLLAMA→  | purpose=%s | model=%s | temp=%.2f | repeat_penalty=%.2f | input=%r",
         purpose,
         model_to_use,
-        config.temperature,
+        temp,
+        repeat_penalty,
         (last_user[:120] + "...") if len(last_user) > 120 else last_user,
     )
     logger.debug("🤖 OLLAMA→  | Full messages payload: %s", messages)
@@ -110,8 +118,13 @@ async def _call_ollama_chat(
                     "messages": messages,
                     "stream": False,
                     "options": {
-                        "temperature": config.temperature,
+                        "temperature": temp,
                         "num_predict": config.max_tokens,
+                        "repeat_penalty": repeat_penalty,
+                        "repeat_last_n": 256,
+                        "top_p": 0.92,
+                        "min_p": 0.05,
+                        "seed": call_seed,
                     },
                 },
             )
@@ -231,9 +244,46 @@ async def generate_roleplay_reply(
         messages.append({"role": role, "content": msg.content})
 
     last_user_msg = next((m.content for m in reversed(history) if m.role == "user"), "Hello.")
+    prev_assistant_msg = next((m.content for m in reversed(history) if m.role == "assistant"), "")
 
     if config.llm_provider in ("auto", "ollama"):
-        res = await _call_ollama_chat(config, messages, purpose=f"roleplay_reply({character.name})")
+        temp_ov = min(1.0, config.temperature + 0.15) if variation_index > 0 else None
+        rep_pen = 1.22 if variation_index > 0 else 1.18
+        res = await _call_ollama_chat(
+            config,
+            messages,
+            purpose=f"roleplay_reply({character.name})",
+            temperature_override=temp_ov,
+            repeat_penalty=rep_pen,
+        )
+        if res and prev_assistant_msg:
+            sim = difflib.SequenceMatcher(None, prev_assistant_msg.strip(), res.strip()).ratio()
+            if sim > 0.82:
+                logger.warning(
+                    "⚠️ OLLAMA↻  | Detected near-duplicate reply (similarity=%.2f) for %s — retrying with anti-repeat prompt",
+                    sim,
+                    character.name,
+                )
+                retry_messages = [
+                    *messages,
+                    {
+                        "role": "system",
+                        "content": (
+                            f"[Important: Your previous reply already happened. Write a completely fresh, "
+                            f"non-repetitive response from {character.name} directly addressing {user_name}'s latest message "
+                            f"and advancing the scene. Do NOT reuse the same opening or sentences.]"
+                        ),
+                    },
+                ]
+                retry_res = await _call_ollama_chat(
+                    config,
+                    retry_messages,
+                    purpose=f"roleplay_reply_retry({character.name})",
+                    temperature_override=min(1.05, config.temperature + 0.22),
+                    repeat_penalty=1.28,
+                )
+                if retry_res:
+                    res = retry_res
         if res:
             return res, f"ollama ({config.ollama_model})"
 

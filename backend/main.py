@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import uuid
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
@@ -23,7 +22,6 @@ from .inference.llm_engine import (
     clean_character_visual_tags_for_scene,
     distill_narrative_to_sdxl_keywords,
     fallback_extract_sdxl_keywords,
-    generate_node_text,
     generate_roleplay_reply,
 )
 from .logger import logger, set_hivemind_log_level

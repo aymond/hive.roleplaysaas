@@ -9,7 +9,6 @@ from backend.inference.llm_engine import (
     build_contextual_scene_prompt,
     build_face_detailer_prompt,
     clean_character_visual_tags_for_scene,
-    distill_narrative_to_sdxl_keywords,
     extract_action_and_scene_beats,
     fallback_extract_sdxl_keywords,
 )
