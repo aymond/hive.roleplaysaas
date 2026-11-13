@@ -149,13 +149,16 @@ export const AssetGallery: React.FC<AssetGalleryProps> = ({
                 key={asset.id}
                 className="bg-[#111520] rounded-2xl border border-white/10 overflow-hidden flex flex-col justify-between group hover:border-amber-500/40 transition"
               >
-                <div className="relative aspect-square bg-black/50 overflow-hidden">
+                <div
+                  className="relative bg-black/50 overflow-hidden flex items-center justify-center"
+                  style={{ aspectRatio: `${asset.width || 512} / ${asset.height || 768}` }}
+                >
                   <img
                     src={asset.url}
                     alt={asset.prompt}
                     width={asset.width}
                     height={asset.height}
-                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                    className="w-full h-full object-contain group-hover:scale-105 transition duration-300"
                   />
                   {char && (
                     <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-lg bg-black/75 text-amber-300 border border-amber-500/30 text-[10px] font-semibold">

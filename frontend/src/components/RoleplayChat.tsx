@@ -469,23 +469,29 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                       )}
 
                       {/* Inline Generated Scene Artwork */}
-                      {msg.image_url && !isIllustratingThis && (
-                        <div className="mt-3 rounded-xl overflow-hidden border border-white/15 bg-black/40">
-                          <img
-                            src={msg.image_url}
-                            alt={msg.image_prompt || 'Scene keyframe'}
-                            width={512}
-                            height={512}
-                            className="w-full max-h-96 object-cover"
-                          />
-                          {msg.image_prompt && (
-                            <div className="px-3 py-2 text-[11px] text-slate-300 bg-[#0b0e16] font-mono leading-relaxed">
-                              <span className="text-amber-300 font-semibold">Scene Prompt: </span>
-                              {msg.image_prompt}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      {msg.image_url && !isIllustratingThis && (() => {
+                        const matchedAsset = gallery.find((g) => g.url === msg.image_url);
+                        const imgW = matchedAsset?.width || 512;
+                        const imgH = matchedAsset?.height || 768;
+                        return (
+                          <div className="mt-3 rounded-xl overflow-hidden border border-white/15 bg-black/60">
+                            <img
+                              src={msg.image_url}
+                              alt={msg.image_prompt || 'Scene keyframe'}
+                              width={imgW}
+                              height={imgH}
+                              style={{ aspectRatio: `${imgW} / ${imgH}` }}
+                              className="w-full h-auto max-h-[680px] object-contain mx-auto block"
+                            />
+                            {msg.image_prompt && (
+                              <div className="px-3 py-2 text-[11px] text-slate-300 bg-[#0b0e16] font-mono leading-relaxed">
+                                <span className="text-amber-300 font-semibold">Scene Prompt: </span>
+                                {msg.image_prompt}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Message Action Bar: Swipes & Scene Illustration */}
                       <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between gap-2 text-xs text-slate-400">
@@ -894,13 +900,18 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                     key={asset.id}
                     className="group rounded-xl overflow-hidden bg-[#121622] border border-white/10 hover:border-cyan-400/50 transition flex flex-col justify-between"
                   >
-                    <div className="relative aspect-square bg-black">
+                    <div
+                      className="relative bg-black flex items-center justify-center overflow-hidden"
+                      style={{
+                        aspectRatio: `${asset.width || 512} / ${asset.height || 768}`,
+                      }}
+                    >
                       <img
                         src={asset.url}
                         alt={asset.prompt}
-                        width={256}
-                        height={256}
-                        className="w-full h-full object-cover"
+                        width={asset.width || 512}
+                        height={asset.height || 768}
+                        className="w-full h-full object-contain"
                       />
                       <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
                         <a
