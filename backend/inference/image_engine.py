@@ -549,7 +549,7 @@ async def _run_comfyui_bridge(
         neg_text = f"score_4, score_5, score_6, {neg_text}"
 
     if use_hybrid:
-        stage1_steps = max(14, int(round(steps * 0.8)))
+        stage1_steps = max(10, int(round(steps * 0.6))) if use_action_hybrid else max(14, int(round(steps * 0.8)))
         clean_non_pony_prompt = (
             prompt.replace("score_9, score_8_up, score_7_up,", "")
             .replace("score_9, score_8_up, score_7_up", "")
@@ -632,14 +632,14 @@ async def _run_comfyui_bridge(
                 "class_type": "KSampler",
                 "inputs": {
                     "seed": seed + 1,
-                    "steps": 14,
+                    "steps": 10 if use_action_hybrid else 14,
                     "cfg": 5.5 if use_action_hybrid else 5.0,
                     "sampler_name": "dpmpp_2m",
                     "scheduler": "karras",
                     "positive": ["12", 0],
                     "negative": ["13", 0],
                     "latent_image": ["16", 0],
-                    "denoise": 0.42 if use_action_hybrid else 0.36,
+                    "denoise": 0.40 if use_action_hybrid else 0.36,
                     "model": ["11", 0],
                 },
             },
@@ -718,10 +718,10 @@ async def _run_comfyui_bridge(
         is_turbo_face = any(k in active_face_ckpt.lower() for k in ("turbo", "lightning", "hyper"))
         pos_face_prompt, neg_face_prompt = build_face_detailer_prompt(prompt, is_pony=is_pony_face)
         face_denoise = float(getattr(config, "comfyui_face_detailer_denoise", 0.36) or 0.36)
-        face_steps = 6 if is_turbo_face else 10
+        face_steps = 6 if is_turbo_face else (8 if use_hybrid else 10)
         face_cfg = 2.0 if is_turbo_face else 5.0
         face_sampler = "dpmpp_sde" if is_turbo_face else "dpmpp_2m"
-        scale_factor = 1.5 if (width * height) < 700_000 else 1.25
+        scale_factor = 1.25 if (use_hybrid or (width * height) >= 700_000) else 1.5
 
         vae_node_id = "11" if use_hybrid else "4"
         model_node_id = "11" if use_hybrid else "4"

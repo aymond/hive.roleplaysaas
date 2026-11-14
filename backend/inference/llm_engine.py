@@ -373,10 +373,22 @@ _ACTION_SCENE_CUES = (
     "crouch", "crouching", "balance", "balancing", "action shot",
 )
 
+_NSFW_ROUTER_CUES = (
+    "nude", "naked", "nudity", "undress", "topless", "breasts", "boobs", "nipple",
+    "nipples", "pussy", "vulva", "labia", "vagina", "clit", "lingerie", "straddle",
+)
+
+
+def _has_word_cue(text: str, cues: tuple[str, ...]) -> bool:
+    """Matches any cue phrase on word boundaries so e.g. 'jump' does not match 'jumpsuit'."""
+    if not text:
+        return False
+    pattern = r"\b(?:" + "|".join(re.escape(c) for c in cues) + r")\b"
+    return bool(re.search(pattern, text, flags=re.IGNORECASE))
+
 
 def is_dynamic_action_scene(text: str) -> bool:
-    t = (text or "").lower()
-    return any(cue in t for cue in _ACTION_SCENE_CUES)
+    return _has_word_cue(text, _ACTION_SCENE_CUES)
 
 
 def clean_character_visual_tags_for_scene(visual_tags: str, scene_text: str) -> str:
@@ -459,28 +471,27 @@ def build_anatomical_and_clothing_overrides(
     scene_lower = (scene_text or "").lower()
     combined = f"{scene_text} {distilled_keywords}".lower()
 
-    wants_rear_view = any(
-        k in combined
-        for k in (
+    wants_rear_view = _has_word_cue(
+        combined,
+        (
             "from behind",
             "walking away",
             "walk away",
             "rear view",
             "back view",
             "backside",
-            "your back",
             "bare back",
-            "her back",
             "butt",
+            "buttocks",
             "derriere",
             "glutes",
             "ass from behind",
-        )
+        ),
     )
 
-    explicit_attire_in_turn = any(
-        k in scene_lower
-        for k in (
+    explicit_attire_in_turn = _has_word_cue(
+        scene_lower,
+        (
             "bikini",
             "swimsuit",
             "swimwear",
@@ -488,12 +499,12 @@ def build_anatomical_and_clothing_overrides(
             "sundress",
             "wearing a dress",
             "wearing clothes",
-        )
+        ),
     )
 
-    wants_lower_nudity = any(
-        k in combined
-        for k in (
+    wants_lower_nudity = _has_word_cue(
+        combined,
+        (
             "labia",
             "vulva",
             "pussy",
@@ -506,11 +517,11 @@ def build_anatomical_and_clothing_overrides(
             "spread her legs",
             "between her legs",
             "pubic",
-        )
+        ),
     )
-    wants_upper_nudity = any(
-        k in combined
-        for k in (
+    wants_upper_nudity = _has_word_cue(
+        combined,
+        (
             "breast",
             "breasts",
             "boobs",
@@ -523,22 +534,24 @@ def build_anatomical_and_clothing_overrides(
             "unclasp",
             "pulls down top",
             "slides off top",
-        )
+        ),
     )
     wants_full_nudity = (
         not explicit_attire_in_turn
-        and any(
-            k in combined
-            for k in (
+        and _has_word_cue(
+            combined,
+            (
                 "nude",
                 "naked",
                 "nudist",
                 "undress",
+                "undressed",
                 "strips",
                 "slipping off",
                 "slips off",
+                "fell away",
                 "without clothes",
-            )
+            ),
         )
     )
 
@@ -619,13 +632,16 @@ def build_anatomical_and_clothing_overrides(
                 "bra",
                 "panties",
                 "dress",
+                "jumpsuit",
+                "bodysuit",
+                "suit",
                 "towel",
                 "censored",
             ]
         )
 
     # If the user wants nudity/exposed anatomy (and did not explicitly ask for attire in this turn),
-    # strip any lingering 'bikini'/'dress'/'swimsuit' words from the LLM-distilled keywords.
+    # strip any lingering clothing words from the LLM-distilled keywords.
     cleaned_kw = distilled_keywords
     if (wants_lower_nudity or wants_upper_nudity or wants_full_nudity) and not explicit_attire_in_turn:
         filtered_tags: list[str] = []
@@ -634,7 +650,10 @@ def build_anatomical_and_clothing_overrides(
             t_low = t_clean.lower()
             if any(
                 cloth in t_low
-                for cloth in ("bikini", "swimsuit", "sundress", "dress", "linen", "clothed", "bra", "panties")
+                for cloth in (
+                    "bikini", "swimsuit", "sundress", "dress", "linen", "clothed",
+                    "bra", "panties", "jumpsuit", "bodysuit", "suit", "cloak", "gown", "robe",
+                )
             ):
                 continue
             if t_clean:
@@ -998,12 +1017,50 @@ def dedupe_and_resolve_prompt_conflicts(
             continue
 
         # Attire vs nudity/swimwear conflict guard (unless explicitly mentioned in the active scene turn)
-        if (is_explicit_nude or has_swimwear_in_scene) and not is_weighted:
-            clothing_words = ("cloak", "dress", "gown", "coat", "trenchcoat", "robe", "armor", "suit", "belt")
+        if is_explicit_nude or has_swimwear_in_scene:
+            clothing_words = (
+                "cloak", "dress", "gown", "coat", "trenchcoat", "robe", "armor",
+                "jumpsuit", "bodysuit", "suit", "belt", "pants", "trousers",
+                "jacket", "shirt", "top", "skirt", "shorts", "outfit", "garment",
+            )
             if is_explicit_nude:
                 clothing_words = (*clothing_words, "bikini", "lingerie", "panties", "bra")
-            if any(cw in norm and cw not in scene_l for cw in clothing_words):
+            if is_explicit_nude and _has_word_cue(scene_l, ("naked", "completely nude", "fell away", "without clothes")):
+                if any(cw in norm for cw in clothing_words):
+                    continue
+            elif not is_weighted and any(cw in norm and cw not in scene_l for cw in clothing_words):
                 continue
+
+        # Semantic / concept overlap deduplication against already-accepted tags
+        # Catches e.g. 'Villa garden' vs 'villa garden background', 'warm golden hour' vs 'warm golden hour sunlight'
+        _generic_fillers = {
+            "in", "on", "at", "the", "a", "an", "of", "with", "and", "to", "for",
+            "background", "backdrop", "landscape", "setup", "shot", "lighting",
+            "light", "sunlight", "view", "angle", "resolution", "style",
+        }
+        norm_tokens = {
+            w for w in re.findall(r"[a-z0-9]+", norm)
+            if len(w) >= 3 and w not in _generic_fillers
+        }
+        is_semantic_dup = False
+        if not is_weighted:
+            for prev_norm in seen:
+                if len(prev_norm) >= 10 and (prev_norm in norm or norm in prev_norm):
+                    is_semantic_dup = True
+                    break
+                prev_tokens = {
+                    w for w in re.findall(r"[a-z0-9]+", prev_norm)
+                    if len(w) >= 3 and w not in _generic_fillers
+                }
+                if len(norm_tokens) >= 2 and len(prev_tokens) >= 2:
+                    overlap = norm_tokens & prev_tokens
+                    if len(overlap) >= 2 and (
+                        len(overlap) >= len(norm_tokens) - 1 or len(overlap) >= len(prev_tokens) - 1
+                    ):
+                        is_semantic_dup = True
+                        break
+        if is_semantic_dup:
+            continue
 
         seen.add(norm)
         resolved.append(tag)
@@ -1027,13 +1084,20 @@ def _clean_llm_tag_output(llm_raw: str | None) -> list[str] | None:
     if not llm_raw:
         return None
     cleaned = llm_raw.strip().strip('"').strip("'").replace("\n", ", ")
-    cleaned = re.sub(r"^(keywords|sdxl tags|tags|prompt|output)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(
+        r"^(?:here\s+are(?:\s+the)?(?:\s+outputted)?\s+[\w\s]*tags?|keywords|sdxl tags|visual tags|tags|prompt|output)\s*:\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
     if len(cleaned) <= 10 or any(r in cleaned.lower() for r in _REFUSAL_PHRASES):
         return None
     tags: list[str] = []
     for raw_t in cleaned.split(","):
         t = raw_t.strip().strip("[]").rstrip(".").strip()
         t = re.sub(r"^(pose|camera framing|camera|framing|attire|setting|lighting|style|face)\s*:\s*", "", t, flags=re.IGNORECASE).strip()
+        if not t or t.endswith(":") or t.lower().startswith(("here are ", "outputted ")):
+            continue
         if len(t) > 2:
             tags.append(" ".join(t.split()[:7]))
     return tags[:18] or None
@@ -1065,15 +1129,15 @@ async def harmonize_sdxl_prompt(
         "if the current turn mentions swimwear, undressing, or nudity, NEVER carry over old outfits (dresses, gowns, cloaks, belts) from the situation checkpoint.\n"
         "3. When the scene involves physical action (jumping, climbing, wakeboarding, running, vaulting, etc.), "
         "prioritize dynamic camera angles, mid-motion body mechanics, environmental interaction, and candid framing (NEVER static portrait posing).\n"
-        "4. Remove all duplicate or redundant concepts (never repeat '8k', 'masterpiece', 'wet skin', etc.).\n"
-        "5. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO sentences, NO refusals)."
+        "4. Remove all duplicate or redundant concepts — NEVER repeat location, lighting, hair, or attire already present in TRACKED VISUAL STATE (output only NEW framing, pose, and environmental micro-details).\n"
+        "5. Output ONLY plain comma-separated tags (1-5 words each, NO brackets, NO labels like 'pose:', NO preamble like 'Here are...', NO sentences, NO refusals)."
     )
 
     user_payload = (
         f"CURRENT SCENE & USER REQUEST (highest priority): {user_intent_text or 'None'} | {action_or_scene_text or 'None'}\n"
         f"SITUATION / SCENARIO & LORE: {scenario_text or 'None'} | {lore_visuals or 'None'}\n"
         f"STYLE HINT (adapt to scene lighting): {style_hint or 'None'}\n\n"
-        "Output 8-14 deduplicated, conflict-free scene, pose, setting & lighting SDXL tags (NO hair/eye/ethnicity tags):"
+        "Output 6-12 deduplicated, conflict-free NEW framing, pose, and lighting SDXL tags (NO hair/eye/ethnicity tags, NO repeating TRACKED VISUAL STATE):"
     )
 
     messages = [
@@ -1082,7 +1146,13 @@ async def harmonize_sdxl_prompt(
     ]
 
     refiner_model = (getattr(config, "prompt_refiner_model", "") or "").strip()
-    use_separate_refiner = bool(refiner_model and refiner_model.lower() != "same" and refiner_model != config.ollama_model)
+    has_nsfw_cues = _has_word_cue(f"{user_intent_text} {action_or_scene_text} {scenario_text}", _NSFW_ROUTER_CUES)
+    use_separate_refiner = bool(
+        refiner_model
+        and refiner_model.lower() != "same"
+        and refiner_model != config.ollama_model
+        and not has_nsfw_cues
+    )
 
     if config.llm_provider in ("auto", "ollama"):
         if use_separate_refiner:
@@ -1283,14 +1353,16 @@ _SCENE_FIELD_CHANGE_CUES: dict[str, tuple[str, ...]] = {
         "tense", "romantic", "playful", "quiet", "crowded", "intimate", "mysterious", "celebration", "dinner", "party",
     ),
     "pose_and_action": (
-        "sit", "stand", "walk", "lie", "kneel", "turn", "lean", "wade", "swim", "dance", "look", "stretch",
+        "sit", "stand", "stsand", "walk", "lie", "kneel", "turn", "lean", "wade", "swim",
+        "dance", "look", "stretch", "kiss", "embrace", "hug", "hold", "step", "undress",
+        "strip", "naked", "nude", "front", "closer", "approach", "jump", "climb", "wakeboard",
     ),
 }
 
 
 def _condense_scene_state_value(val: str, max_words: int = 7) -> str:
-    """Caps a SceneState field to a crisp visual phrase (no multi-sentence prose or ellipsis)."""
-    s = " ".join((val or "").replace("\n", " ").split()).strip(" .;,")
+    """Caps a SceneState field to a crisp visual phrase (no markdown asterisks or multi-sentence prose)."""
+    s = " ".join((val or "").replace("\n", " ").replace("*", "").split()).strip(" .;,\"'")
     if not s:
         return ""
     # Drop anything after a sentence break or semicolon if it exceeds max_words
@@ -1414,7 +1486,20 @@ async def update_scene_state(
     ]
 
     refiner_model = (getattr(config, "prompt_refiner_model", "") or "").strip()
-    use_separate_refiner = bool(refiner_model and refiner_model.lower() != "same" and refiner_model != config.ollama_model)
+    has_nsfw_cues = _has_word_cue(turn_text, _NSFW_ROUTER_CUES)
+    use_separate_refiner = bool(
+        refiner_model
+        and refiner_model.lower() != "same"
+        and refiner_model != config.ollama_model
+        and not has_nsfw_cues
+    )
+
+    def _apply_deterministic_nudity_override(state: SceneState) -> SceneState:
+        if _has_word_cue(turn_text, ("naked", "completely nude", "nudity", "fell away completely")) and not _has_word_cue(
+            user_text, ("bikini", "swimsuit", "dress", "jumpsuit", "put on", "wearing")
+        ):
+            state.attire = "completely nude"
+        return state
 
     if config.llm_provider in ("auto", "ollama"):
         if use_separate_refiner:
@@ -1427,7 +1512,7 @@ async def update_scene_state(
             )
             parsed = _parse_scene_state_json(raw_small, prev, turn_text=turn_text)
             if parsed:
-                return parsed
+                return _apply_deterministic_nudity_override(parsed)
 
         raw_main = await _call_ollama_chat(
             config,
@@ -1437,14 +1522,14 @@ async def update_scene_state(
         )
         parsed = _parse_scene_state_json(raw_main, prev, turn_text=turn_text)
         if parsed:
-            return parsed
+            return _apply_deterministic_nudity_override(parsed)
     elif config.llm_provider == "openai_compat":
         raw_oai = await _call_openai_compat_chat(config, messages)
         parsed = _parse_scene_state_json(raw_oai, prev, turn_text=turn_text)
         if parsed:
-            return parsed
+            return _apply_deterministic_nudity_override(parsed)
 
-    return prev
+    return _apply_deterministic_nudity_override(prev)
 
 
 def extract_action_and_scene_beats(messages: list[ChatMessage], target_msg: ChatMessage) -> tuple[str, str]:
@@ -1558,12 +1643,22 @@ async def build_contextual_scene_prompt(
             "painterly illustration, luminous rim lighting, soft painterly skin glow, romantic atmosphere"
         )
 
+    effective_lore_visuals = lore_visuals
+    if scene_state and (scene_state.location or "").strip() and lore_visuals:
+        loc_words = {
+            w for w in re.findall(r"[a-z0-9]+", scene_state.location.lower())
+            if len(w) >= 4
+        }
+        lore_l = lore_visuals.lower()
+        if loc_words and not any(w in lore_l for w in loc_words):
+            effective_lore_visuals = ""
+
     harmonized_tags, _ = await harmonize_sdxl_prompt(
         config=config,
         user_intent_text=user_intent,
         action_or_scene_text=char_actions or target_msg.content,
         scenario_text=scenario_text,
-        lore_visuals=lore_visuals,
+        lore_visuals=effective_lore_visuals,
         style_hint=style_suffix,
     )
 
@@ -1581,7 +1676,7 @@ async def build_contextual_scene_prompt(
     action_tags = "dynamic action shot, mid-motion, candid full body, natural physics" if action_scene else ""
     final_tags = dedupe_and_resolve_prompt_conflicts(
         [quality_prefix, anat_boost, solo_tag, action_tags, state_tags, physical_traits, cleaned_harmonized_kw],
-        scene_text=f"{scene_focus} {state_tags}",
+        scene_text=scene_focus,
     )
     final_prompt = ", ".join(final_tags)
     logger.info(

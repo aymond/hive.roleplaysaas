@@ -331,10 +331,26 @@ def test_harmonize_sdxl_prompt_fallback_on_refusal(monkeypatch) -> None:
             style_hint="luminous rim lighting",
         )
     )
-    assert calls == ["llama3.2:latest", "hermes3:8b"]
+    # Explicit NSFW cues skip llama3.2:latest to avoid refusal/model-swap churn
+    assert calls == ["hermes3:8b"]
     assert "hermes3:8b" in provider
     assert "I cannot" not in tags
     assert "turquoise lagoon" in tags
+
+    # Non-NSFW-keyword prompt still tries llama3.2:latest and falls back on refusal
+    calls.clear()
+    tags2, provider2 = asyncio.run(
+        harmonize_sdxl_prompt(
+            config=cfg,
+            user_intent_text="moonlit lagoon evening",
+            action_or_scene_text="wading into the water",
+            character_traits="silver hair, violet eyes",
+            style_hint="luminous rim lighting",
+        )
+    )
+    assert calls == ["llama3.2:latest", "hermes3:8b"]
+    assert "hermes3:8b" in provider2
+    assert "I cannot" not in tags2
 
 
 def test_character_card_traits_preserved_verbatim(monkeypatch) -> None:
@@ -562,6 +578,102 @@ def test_dynamic_action_scene_strips_portrait_bias(monkeypatch) -> None:
     assert "mid-motion" in prompt
     assert "radiant warm smile" not in prompt
     assert "stylized glamour digital art" not in prompt
+
+
+def test_jumpsuit_does_not_trigger_action_or_rear_view() -> None:
+    from backend.inference.llm_engine import (
+        build_anatomical_and_clothing_overrides,
+        is_dynamic_action_scene,
+    )
+
+    text = "Time to get undressed. What are you hiding underneath that sleek black jumpsuit? long wavy hair down back"
+    assert not is_dynamic_action_scene(text)
+    boosts, _, _ = build_anatomical_and_clothing_overrides(text)
+    assert "from behind" not in boosts
+    assert "rear view" not in boosts
+
+
+def test_naked_kiss_strips_stale_jumpsuit_and_updates_scene_state(monkeypatch) -> None:
+    from backend.inference.llm_engine import (
+        build_contextual_scene_prompt,
+        update_scene_state,
+    )
+    from backend.models import ChatMessage, CharacterCard, InferenceConfig, SceneState
+
+    async def fake_harmonize(**kwargs):
+        return "standing in front, ready to kiss, villa garden background, warm golden hour sunlight, sleek partially-unzipped jumpsuit", "mock"
+
+    monkeypatch.setattr("backend.inference.llm_engine.harmonize_sdxl_prompt", fake_harmonize)
+
+    prev_state = SceneState(
+        location="Villa garden",
+        time_and_lighting="warm golden hour",
+        attire="sleek black jumpsuit tailored for infiltration partially unzipped",
+        pose_and_action="*Liamching moved with grace of dancer diva stepping",
+        pinned_fields=["pose_and_action", "location"],
+    )
+    # Even if LLM fails/offline, deterministic nudity override updates attire
+    async def offline_ollama(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", offline_ollama)
+    updated_state = asyncio.run(
+        update_scene_state(
+            InferenceConfig(),
+            prev_state,
+            user_text="I want you to stand in front of me, naked, ready to kiss",
+            assistant_text="*The last strands of suit fell away completely.*",
+        )
+    )
+    assert updated_state.attire == "completely nude"
+    assert not updated_state.pose_and_action.startswith("*")
+
+    char = CharacterCard(name="Liamching", visual_prompt_tags="1girl, stunning asian woman")
+    user_msg = ChatMessage(role="user", sender_name="Traveler", content="I want you to stand in front of me, naked, ready to kiss")
+    asst_msg = ChatMessage(role="assistant", sender_name="Liamching", content="*Liamching stepped closer, completely naked, ready to kiss.*")
+    prompt = asyncio.run(
+        build_contextual_scene_prompt(
+            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors"),
+            char,
+            [user_msg, asst_msg],
+            asst_msg,
+            lore_visuals="tranquil beach resort backdrop, luxurious cabana setup, shimmering ocean waves, twinkling lantern lights",
+            scene_state=prev_state,
+        )
+    )
+    assert "completely nude" in prompt
+    assert "jumpsuit" not in prompt.lower()
+    assert "dynamic action shot" not in prompt
+    assert "tranquil beach resort" not in prompt
+    assert "lantern" not in prompt.lower()
+
+
+def test_semantic_dedup_and_preamble_cleanup() -> None:
+    from backend.inference.llm_engine import (
+        _clean_llm_tag_output,
+        dedupe_and_resolve_prompt_conflicts,
+    )
+
+    cleaned = _clean_llm_tag_output("Here are the outputted visual tags: villa garden background, warm golden hour sunlight, intimate kiss")
+    assert cleaned is not None
+    assert not any("here are" in t.lower() or "outputted" in t.lower() for t in cleaned)
+
+    resolved = dedupe_and_resolve_prompt_conflicts(
+        [
+            "(Villa garden:1.2)",
+            "warm golden hour",
+            "villa garden background",
+            "warm golden hour sunlight",
+            "intimate kiss",
+        ],
+        scene_text="standing in villa garden",
+    )
+    joined = ", ".join(resolved)
+    assert "Villa garden" in joined
+    assert "villa garden background" not in joined
+    assert "warm golden hour" in joined
+    assert "warm golden hour sunlight" not in joined
+    assert "intimate kiss" in joined
 
 
 
