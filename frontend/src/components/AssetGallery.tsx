@@ -158,6 +158,7 @@ export const AssetGallery: React.FC<AssetGalleryProps> = ({
                     alt={asset.prompt}
                     width={asset.width}
                     height={asset.height}
+                    loading="lazy"
                     className="w-full h-full object-contain group-hover:scale-105 transition duration-300"
                   />
                   {char && (

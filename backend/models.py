@@ -88,6 +88,7 @@ class ChatMessage(BaseModel):
     image_url: str | None = None
     image_prompt: str | None = None
     triggered_lore: list[TriggeredLoreInfo] = Field(default_factory=list)
+    timings: dict[str, Any] | None = None
     created_at: str = Field(default_factory=utc_now_iso)
 
 
@@ -202,6 +203,7 @@ class InferenceConfig(BaseModel):
     comfyui_face_detailer_enabled: bool = True
     comfyui_face_detailer_model: str = "same"
     comfyui_face_detailer_denoise: float = 0.36
+    comfyui_face_detailer_scale: float = 1.25
     comfyui_sampler: str = "dpmpp_2m"
     comfyui_scheduler: str = "karras"
     default_width: int = 768
@@ -222,4 +224,5 @@ class GalleryAsset(BaseModel):
     character_id: str | None = None
     world_id: str | None = None
     workflow_id: str | None = None
+    duration_ms: float | None = None
     created_at: str = Field(default_factory=utc_now_iso)

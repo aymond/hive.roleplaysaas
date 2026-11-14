@@ -1,0 +1,6 @@
+{"ts": "2026-11-14T11:38:14.967863+00:00", "kind": "chat", "provider": "builtin_synth (Apple Silicon Local Narrative Engine)", "lore_ms": 0.0, "ckpt_ms": 0.0, "reply_ms": 6.2, "scene_state_ms": 11.8, "total_ms": 18.1, "illustrate": {"prompt_ms": 8.2, "render_ms": 26.1}}
+{"ts": "2026-11-14T11:38:15.020958+00:00", "kind": "studio", "provider": "procedural_art (Apple Silicon Instant Canvas)", "prompt_ms": 7.3, "render_ms": 41.3, "total_ms": 48.6}
+{"ts": "2026-11-14T11:38:15.138453+00:00", "kind": "scene", "provider": "mock_comfyui", "lore_ms": 0.0, "prompt_ms": 0.5, "render_ms": 0.0, "total_ms": 0.5}
+{"ts": "2026-11-14T11:40:57.293509+00:00", "kind": "chat", "provider": "builtin_synth (Apple Silicon Local Narrative Engine)", "lore_ms": 0.0, "ckpt_ms": 0.0, "reply_ms": 5.6, "scene_state_ms": 10.7, "total_ms": 16.4, "illustrate": {"prompt_ms": 7.1, "render_ms": 22.4}}
+{"ts": "2026-11-14T11:40:57.341673+00:00", "kind": "studio", "provider": "procedural_art (Apple Silicon Instant Canvas)", "prompt_ms": 6.5, "render_ms": 37.8, "total_ms": 44.3}
+{"ts": "2026-11-14T11:40:57.364035+00:00", "kind": "scene", "provider": "mock_comfyui", "lore_ms": 0.0, "prompt_ms": 0.5, "render_ms": 0.0, "total_ms": 0.5}

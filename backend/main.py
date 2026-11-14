@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -28,6 +31,7 @@ from .inference.llm_engine import (
     format_scene_state_tags,
     generate_roleplay_reply,
     harmonize_sdxl_prompt,
+    stream_roleplay_reply,
     update_scene_state,
 )
 from .logger import logger, set_hivemind_log_level
@@ -129,6 +133,53 @@ async def _maybe_update_chat_checkpoint(
             provider,
         )
     return session.situation_checkpoint
+
+
+_METRICS_PATH = Path(__file__).resolve().parent / "data" / "metrics.jsonl"
+
+
+def _record_metric(kind: str, payload: dict[str, Any]) -> None:
+    try:
+        _METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {"ts": utc_now_iso(), "kind": kind, **payload}
+        with _METRICS_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception as exc:
+        logger.debug("Metrics write skipped: %s", exc)
+
+
+@app.get("/api/system/metrics")
+async def get_system_metrics() -> dict[str, Any]:
+    records: list[dict[str, Any]] = []
+    if _METRICS_PATH.exists():
+        try:
+            lines = _METRICS_PATH.read_text(encoding="utf-8").splitlines()[-200:]
+            for line in lines:
+                if line.strip():
+                    records.append(json.loads(line))
+        except Exception:
+            records = []
+
+    def _summarize(kind: str) -> dict[str, Any]:
+        vals = sorted(float(r["total_ms"]) for r in records if r.get("kind") == kind and r.get("total_ms") is not None)
+        if not vals:
+            return {"count": 0, "avg_ms": None, "p50_ms": None, "p95_ms": None, "latest_ms": None}
+        n = len(vals)
+        latest = next((r.get("total_ms") for r in reversed(records) if r.get("kind") == kind), vals[-1])
+        return {
+            "count": n,
+            "avg_ms": round(sum(vals) / n, 1),
+            "p50_ms": round(vals[n // 2], 1),
+            "p95_ms": round(vals[min(n - 1, int(n * 0.95))], 1),
+            "latest_ms": latest,
+        }
+
+    return {
+        "chat": _summarize("chat"),
+        "scene": _summarize("scene"),
+        "studio": _summarize("studio"),
+        "recent": records[-15:][::-1],
+    }
 
 
 class LoreScanRequest(BaseModel):
@@ -549,9 +600,13 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     )
     lore_ms = (time.perf_counter() - t0) * 1000
 
-    t0 = time.perf_counter()
-    await _maybe_update_chat_checkpoint(session, card)
-    ckpt_ms = (time.perf_counter() - t0) * 1000
+    ckpt_ms = 0.0
+    if len(session.messages) >= 8 and (len(session.messages) - session.checkpoint_msg_count) >= 8:
+        async def _bg_checkpoint() -> None:
+            await _maybe_update_chat_checkpoint(session, card)
+            storage.save()
+
+        asyncio.create_task(_bg_checkpoint())
 
     t0 = time.perf_counter()
     reply_text, provider_used = await generate_roleplay_reply(
@@ -652,6 +707,11 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     }
     if illustrate_timings:
         timings["illustrate"] = illustrate_timings
+    assistant_msg.timings = timings
+    _record_metric("chat", {"provider": provider_used, **timings})
+
+    session.updated_at = utc_now_iso()
+    storage.save()
 
     return {
         "session": session.model_dump(),
@@ -659,6 +719,107 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         "triggered_lore": [t.model_dump() for t in lore_res.triggered],
         "timings": timings,
     }
+
+
+@app.post("/api/chats/{chat_id}/messages/stream")
+async def stream_chat_message(chat_id: str, req: SendMessageRequest):
+    session = storage.chats.get(chat_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    card = storage.characters.get(session.character_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Character not found")
+    world = storage.worlds.get(session.world_id) if session.world_id else None
+
+    user_msg = ChatMessage(
+        role="user",
+        sender_name=session.user_persona_name,
+        content=req.content,
+        swipes=[req.content],
+    )
+    session.messages.append(user_msg)
+
+    t_total0 = time.perf_counter()
+    t0 = time.perf_counter()
+    combined_scan_text = " ".join(m.content for m in session.messages[-3:])
+    lore_res = scan_lorebook(
+        lorebook=world,
+        text_to_scan=combined_scan_text,
+        char_name=card.name,
+        user_name=session.user_persona_name,
+    )
+    lore_ms = (time.perf_counter() - t0) * 1000
+
+    if len(session.messages) >= 8 and (len(session.messages) - session.checkpoint_msg_count) >= 8:
+        async def _bg_checkpoint() -> None:
+            await _maybe_update_chat_checkpoint(session, card)
+            storage.save()
+
+        asyncio.create_task(_bg_checkpoint())
+
+    async def _event_stream():
+        t_reply0 = time.perf_counter()
+        chunks: list[str] = []
+        provider_used = f"ollama ({storage.config.ollama_model})"
+        async for delta, prov in stream_roleplay_reply(
+            config=storage.config,
+            character=card,
+            history=session.messages,
+            lore_context=lore_res.context_block,
+            triggered_lore=lore_res.triggered,
+            user_name=session.user_persona_name,
+            user_desc=session.user_persona_desc,
+            situation_checkpoint=session.situation_checkpoint,
+            scene_state=session.scene_state,
+        ):
+            provider_used = prov
+            if delta:
+                chunks.append(delta)
+                yield f"data: {json.dumps({'type': 'delta', 'delta': delta})}\n\n"
+
+        reply_text = "".join(chunks).strip() or "..."
+        reply_ms = (time.perf_counter() - t_reply0) * 1000
+        assistant_msg = ChatMessage(
+            role="assistant",
+            sender_name=card.name,
+            content=reply_text,
+            swipes=[reply_text],
+            active_swipe=0,
+            triggered_lore=lore_res.triggered,
+        )
+        session.messages.append(assistant_msg)
+
+        t_state0 = time.perf_counter()
+        session.scene_state = await update_scene_state(
+            config=storage.config,
+            previous_state=session.scene_state,
+            user_text=req.content,
+            assistant_text=reply_text,
+            world_aesthetic=world.aesthetic_style if world else "",
+        )
+        scene_state_ms = (time.perf_counter() - t_state0) * 1000
+        total_ms = (time.perf_counter() - t_total0) * 1000
+        timings = {
+            "lore_ms": round(lore_ms, 1),
+            "ckpt_ms": 0.0,
+            "reply_ms": round(reply_ms, 1),
+            "scene_state_ms": round(scene_state_ms, 1),
+            "total_ms": round(total_ms, 1),
+        }
+        assistant_msg.timings = timings
+        _record_metric("chat", {"provider": provider_used, **timings})
+        session.updated_at = utc_now_iso()
+        storage.save()
+        logger.info(
+            "⏱️ CHAT(SSE) | total=%.2fs (lore=%.0fms, reply=%.2fs, scene_state=%.2fs)",
+            total_ms / 1000,
+            lore_ms,
+            reply_ms / 1000,
+            scene_state_ms / 1000,
+        )
+        yield f"data: {json.dumps({'type': 'done', 'session': session.model_dump(), 'provider': provider_used, 'timings': timings})}\n\n"
+
+    return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/chats/{chat_id}/messages/{msg_id}/swipe")
@@ -845,6 +1006,15 @@ async def illustrate_chat_message(
         target_msg.triggered_lore = lore_res.triggered
     session.updated_at = utc_now_iso()
 
+    scene_timings = {
+        "lore_ms": round(lore_ms, 1),
+        "prompt_ms": round(prompt_ms, 1),
+        "render_ms": round(render_ms, 1),
+        "total_ms": round(total_ms, 1),
+    }
+    target_msg.timings = {**(target_msg.timings or {}), **scene_timings}
+    _record_metric("scene", {"provider": img_meta["provider"], **scene_timings})
+
     asset = GalleryAsset(
         url=img_meta["url"],
         prompt=full_prompt,
@@ -854,18 +1024,14 @@ async def illustrate_chat_message(
         seed=img_meta["seed"],
         character_id=card.id if card else None,
         world_id=session.world_id,
+        duration_ms=img_meta.get("duration_ms"),
     )
     storage.gallery.insert(0, asset)
     storage.save()
     return {
         "session": session.model_dump(),
         "asset": asset.model_dump(),
-        "timings": {
-            "lore_ms": round(lore_ms, 1),
-            "prompt_ms": round(prompt_ms, 1),
-            "render_ms": round(render_ms, 1),
-            "total_ms": round(total_ms, 1),
-        },
+        "timings": scene_timings,
     }
 
 
@@ -1165,6 +1331,13 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         render_ms / 1000,
     )
 
+    studio_timings = {
+        "prompt_ms": round(prompt_ms, 1),
+        "render_ms": round(render_ms, 1),
+        "total_ms": round(total_ms, 1),
+    }
+    _record_metric("studio", {"provider": img_meta["provider"], **studio_timings})
+
     asset = GalleryAsset(
         url=img_meta["url"],
         prompt=assembled_prompt,
@@ -1175,6 +1348,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         seed=img_meta["seed"],
         character_id=card.id if card else None,
         world_id=world.id if world else None,
+        duration_ms=img_meta.get("duration_ms"),
     )
     storage.gallery.insert(0, asset)
     storage.save()
@@ -1185,9 +1359,5 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         "triggered_lore": triggered_lore_list,
         "image_provider": img_meta["provider"],
         "llm_provider": llm_provider_used,
-        "timings": {
-            "prompt_ms": round(prompt_ms, 1),
-            "render_ms": round(render_ms, 1),
-            "total_ms": round(total_ms, 1),
-        },
+        "timings": studio_timings,
     }

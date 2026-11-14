@@ -721,7 +721,8 @@ async def _run_comfyui_bridge(
         face_steps = 6 if is_turbo_face else (8 if use_hybrid else 10)
         face_cfg = 2.0 if is_turbo_face else 5.0
         face_sampler = "dpmpp_sde" if is_turbo_face else "dpmpp_2m"
-        scale_factor = 1.25 if (use_hybrid or (width * height) >= 700_000) else 1.5
+        configured_scale = float(getattr(config, "comfyui_face_detailer_scale", 1.25) or 1.25)
+        scale_factor = min(configured_scale, 1.25) if (use_hybrid or (width * height) >= 700_000) else configured_scale
 
         vae_node_id = "11" if use_hybrid else "4"
         model_node_id = "11" if use_hybrid else "4"

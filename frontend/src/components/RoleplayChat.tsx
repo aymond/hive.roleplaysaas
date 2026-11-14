@@ -83,6 +83,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [autoIllustrate, setAutoIllustrate] = useState(false);
   const [sending, setSending] = useState(false);
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
+  const [streamingReply, setStreamingReply] = useState<string>('');
   const [illustratingMsgId, setIllustratingMsgId] = useState<string | null>(null);
   const [editedScenePrompts, setEditedScenePrompts] = useState<Record<string, string>>({});
   const [checkpointOpen, setCheckpointOpen] = useState(false);
@@ -205,12 +206,19 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     const text = inputMessage.trim();
     setInputMessage('');
     setPendingUserText(text);
+    setStreamingReply('');
     setSending(true);
     const shouldAutoIllustrate = autoIllustrate;
     let newAssistantMsgId: string | null = null;
     try {
-      // Always fetch the text reply first without blocking on image generation
-      const res = await api.sendMessage(activeSession.id, text, false);
+      let res: { session: ChatSession; provider: string; timings?: Record<string, any> };
+      try {
+        res = await api.streamMessage(activeSession.id, text, (delta) => {
+          setStreamingReply((prev) => prev + delta);
+        });
+      } catch {
+        res = await api.sendMessage(activeSession.id, text, false);
+      }
       setLastProvider(res.provider);
       const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
       onChatsUpdated(nextChats);
@@ -223,6 +231,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     } finally {
       setSending(false);
       setPendingUserText(null);
+      setStreamingReply('');
     }
 
     if (newAssistantMsgId) {
@@ -692,6 +701,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                               alt={msg.image_prompt || 'Scene keyframe'}
                               width={imgW}
                               height={imgH}
+                              loading="lazy"
                               style={{ aspectRatio: `${imgW} / ${imgH}` }}
                               className="w-full h-auto max-h-[680px] object-contain mx-auto block"
                             />
@@ -760,22 +770,37 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                         );
                       })()}
 
-                      {/* Message Action Bar: Swipes & Scene Illustration */}
+                      {/* Message Action Bar: Swipes, Timings & Scene Illustration */}
                       <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between gap-2 text-xs text-slate-400">
-                        <button
-                          type="button"
-                          onClick={() => handleIllustrateTurn(msg.id)}
-                          disabled={isIllustratingThis}
-                          className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-amber-500/20 hover:text-amber-200 border border-white/10 flex items-center gap-1.5 text-[11px] cursor-pointer transition disabled:opacity-50"
-                          title="Generate (or regenerate) a ComfyUI image for this turn using the character card, tracked Scene State, and active turn (also syncs Scene State)"
-                        >
-                          <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
-                          {isIllustratingThis
-                            ? 'Rendering Scene in ComfyUI...'
-                            : msg.image_url
-                            ? 'Re-Illustrate Scene'
-                            : 'Illustrate Scene'}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleIllustrateTurn(msg.id)}
+                            disabled={isIllustratingThis}
+                            className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-amber-500/20 hover:text-amber-200 border border-white/10 flex items-center gap-1.5 text-[11px] cursor-pointer transition disabled:opacity-50"
+                            title="Generate (or regenerate) a ComfyUI image for this turn using the character card, tracked Scene State, and active turn (also syncs Scene State)"
+                          >
+                            <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                            {isIllustratingThis
+                              ? 'Rendering Scene in ComfyUI...'
+                              : msg.image_url
+                              ? 'Re-Illustrate Scene'
+                              : 'Illustrate Scene'}
+                          </button>
+                          {msg.timings && (msg.timings.reply_ms || msg.timings.render_ms) && (
+                            <span
+                              className="text-[10px] font-mono text-slate-500"
+                              title="Measured local inference latency for this turn"
+                            >
+                              {[
+                                msg.timings.reply_ms ? `reply ${(msg.timings.reply_ms / 1000).toFixed(1)}s` : null,
+                                msg.timings.render_ms ? `img ${(msg.timings.render_ms / 1000).toFixed(1)}s` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </span>
+                          )}
+                        </div>
 
                         {isAssistant && (
                           <div className="flex items-center gap-1">
@@ -834,7 +859,18 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                       className="w-10.5 h-10.5 rounded-xl object-cover border-2 border-amber-400 animate-pulse shrink-0 mt-0.5"
                     />
                     <div className="max-w-2xl w-full">
-                      <GenerationProgressCard
+                      {streamingReply ? (
+                        <div className="rounded-2xl p-4 border bg-[#121622] border-amber-500/30 text-slate-100">
+                          <div className="text-xs font-bold text-amber-300 mb-1.5 flex items-center gap-2">
+                            <span>{activeCharacter.name}</span>
+                            <span className="text-[10px] font-mono text-emerald-300 animate-pulse">
+                              streaming…
+                            </span>
+                          </div>
+                          <div className="text-sm">{renderFormattedRoleplayText(streamingReply)}</div>
+                        </div>
+                      ) : (
+                        <GenerationProgressCard
                         title={
                           autoIllustrate
                             ? `${activeCharacter.name} is replying & rendering scene keyframe...`
@@ -861,6 +897,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                         }
                         accent="amber"
                       />
+                      )}
                     </div>
                   </div>
                 </>

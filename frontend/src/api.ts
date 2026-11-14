@@ -119,10 +119,64 @@ export const api = {
       session: ChatSession;
       provider: string;
       triggered_lore: TriggeredLoreInfo[];
+      timings?: Record<string, any>;
     }>(`/api/chats/${chatId}/messages`, {
       method: 'POST',
       body: JSON.stringify({ content, illustrate_scene: illustrateScene }),
     }),
+  streamMessage: async (
+    chatId: string,
+    content: string,
+    onDelta: (delta: string) => void
+  ): Promise<{ session: ChatSession; provider: string; timings?: Record<string, any> }> => {
+    const resp = await fetch(`/api/chats/${chatId}/messages/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, illustrate_scene: false }),
+    });
+    if (!resp.ok || !resp.body) {
+      throw new Error(`Stream error: ${resp.status}`);
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalPayload: { session: ChatSession; provider: string; timings?: Record<string, any> } | null = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        try {
+          const evt = JSON.parse(line.slice(5).trim());
+          if (evt.type === 'delta' && evt.delta) {
+            onDelta(evt.delta);
+          } else if (evt.type === 'done') {
+            finalPayload = {
+              session: evt.session,
+              provider: evt.provider,
+              timings: evt.timings,
+            };
+          }
+        } catch {
+          // ignore malformed SSE chunk
+        }
+      }
+    }
+    if (!finalPayload) {
+      throw new Error('Stream ended without final payload');
+    }
+    return finalPayload;
+  },
+  getSystemMetrics: () =>
+    request<{
+      chat: { count: number; avg_ms: number | null; p50_ms: number | null; p95_ms: number | null; latest_ms: number | null };
+      scene: { count: number; avg_ms: number | null; p50_ms: number | null; p95_ms: number | null; latest_ms: number | null };
+      studio: { count: number; avg_ms: number | null; p50_ms: number | null; p95_ms: number | null; latest_ms: number | null };
+    }>('/api/system/metrics'),
   swipeMessage: (chatId: string, msgId: string, direction: 'prev' | 'next' | 'regenerate') =>
     request<{ session: ChatSession; provider?: string }>(
       `/api/chats/${chatId}/messages/${msgId}/swipe`,

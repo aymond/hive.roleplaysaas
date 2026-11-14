@@ -73,6 +73,13 @@ export interface ChatMessage {
   image_url: string | null;
   image_prompt: string | null;
   triggered_lore: TriggeredLoreInfo[];
+  timings?: {
+    reply_ms?: number;
+    render_ms?: number;
+    prompt_ms?: number;
+    scene_state_ms?: number;
+    total_ms?: number;
+  } | null;
   created_at?: string;
 }
 
@@ -179,6 +186,7 @@ export interface InferenceConfig {
   comfyui_face_detailer_enabled?: boolean;
   comfyui_face_detailer_model?: string;
   comfyui_face_detailer_denoise?: number;
+  comfyui_face_detailer_scale?: number;
   comfyui_sampler?: string;
   comfyui_scheduler?: string;
   default_width: number;
@@ -225,5 +233,6 @@ export interface GalleryAsset {
   character_id?: string | null;
   world_id?: string | null;
   workflow_id?: string | null;
+  duration_ms?: number | null;
   created_at: string;
 }

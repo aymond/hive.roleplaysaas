@@ -21,6 +21,17 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
     status?.config || null
   );
   const [saving, setSaving] = useState(false);
+  const [metrics, setMetrics] = useState<{
+    chat: { count: number; avg_ms: number | null; p50_ms: number | null; latest_ms: number | null };
+    scene: { count: number; avg_ms: number | null; p50_ms: number | null; latest_ms: number | null };
+    studio: { count: number; avg_ms: number | null; p50_ms: number | null; latest_ms: number | null };
+  } | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      api.getSystemMetrics().then(setMetrics).catch(() => setMetrics(null));
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (status?.config) {
@@ -473,7 +484,35 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
                     className="w-full accent-emerald-400"
                   />
                 </div>
+                <div className="col-span-2">
+                  <label className="block text-[11px] text-slate-300 mb-1">
+                    Face Pass Upscale Factor
+                  </label>
+                  <select
+                    value={String(draftConfig.comfyui_face_detailer_scale ?? 1.25)}
+                    onChange={(e) =>
+                      setDraftConfig({
+                        ...draftConfig,
+                        comfyui_face_detailer_scale: Number(e.target.value),
+                      })
+                    }
+                    className="w-full bg-[#0d111b] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                  >
+                    <option value="1.25">1.25x — Faster (~6–8s saved per render, Recommended)</option>
+                    <option value="1.5">1.5x — High-Res Detail (slower)</option>
+                  </select>
+                </div>
               </div>
+              {metrics && (
+                <div className="mt-2 p-2.5 rounded-lg bg-[#0d111b] border border-white/10 text-[11px] text-slate-300 flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-amber-300">Local Performance Metrics:</span>
+                  <span className="font-mono text-slate-300">
+                    Chat p50: {metrics.chat.p50_ms ? `${(metrics.chat.p50_ms / 1000).toFixed(1)}s` : '—'} ({metrics.chat.count}) ·
+                    Scene p50: {metrics.scene.p50_ms ? `${(metrics.scene.p50_ms / 1000).toFixed(1)}s` : '—'} ({metrics.scene.count}) ·
+                    Studio p50: {metrics.studio.p50_ms ? `${(metrics.studio.p50_ms / 1000).toFixed(1)}s` : '—'} ({metrics.studio.count})
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-4 pt-1">

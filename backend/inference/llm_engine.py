@@ -122,23 +122,27 @@ async def _call_ollama_chat(
     )
     logger.debug("🤖 OLLAMA→  | Full messages payload: %s", messages)
     try:
+        payload: dict[str, Any] = {
+            "model": model_to_use,
+            "messages": messages,
+            "stream": False,
+            "keep_alive": "15m",
+            "options": {
+                "temperature": temp,
+                "num_predict": config.max_tokens,
+                "repeat_penalty": repeat_penalty,
+                "repeat_last_n": 256,
+                "top_p": 0.92,
+                "min_p": 0.05,
+                "seed": call_seed,
+            },
+        }
+        if purpose.startswith("update_scene_state"):
+            payload["format"] = "json"
         async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
                 f"{config.ollama_base_url.rstrip('/')}/api/chat",
-                json={
-                    "model": model_to_use,
-                    "messages": messages,
-                    "stream": False,
-                    "options": {
-                        "temperature": temp,
-                        "num_predict": config.max_tokens,
-                        "repeat_penalty": repeat_penalty,
-                        "repeat_last_n": 256,
-                        "top_p": 0.92,
-                        "min_p": 0.05,
-                        "seed": call_seed,
-                    },
-                },
+                json=payload,
             )
             elapsed = time.perf_counter() - t0
             if resp.status_code == 200:
@@ -322,6 +326,96 @@ async def generate_roleplay_reply(
         variation_index=variation_index,
     )
     return reply, "builtin_synth (Apple Silicon Local Narrative Engine)"
+
+
+async def stream_roleplay_reply(
+    config: InferenceConfig,
+    character: CharacterCard,
+    history: list[ChatMessage],
+    lore_context: str,
+    triggered_lore: list[TriggeredLoreInfo],
+    user_name: str = "Traveler",
+    user_desc: str = "",
+    situation_checkpoint: str = "",
+    scene_state: SceneState | None = None,
+):
+    """Async generator yielding (chunk_text, provider_used) tuples for live token streaming."""
+    if config.llm_provider in ("auto", "ollama"):
+        status = await check_ollama_status(config.ollama_base_url)
+        if status["online"] and status["models"]:
+            available = status["models"]
+            target = (config.ollama_model or "").strip()
+            model_to_use = (
+                target
+                if target in available
+                else next((m for m in available if target.lower() in m.lower()), None)
+                or next((m for m in available if "hermes" in m.lower()), None)
+                or available[0]
+            )
+            sys_prompt = build_tavern_system_prompt(
+                character,
+                lore_context,
+                user_name,
+                user_desc,
+                situation_checkpoint=situation_checkpoint,
+                scene_state=scene_state,
+            )
+            messages: list[dict[str, str]] = [{"role": "system", "content": sys_prompt}]
+            recent_window = history[-8:] if (situation_checkpoint and situation_checkpoint.strip()) else history[-12:]
+            for msg in recent_window:
+                role = "assistant" if msg.role == "assistant" else "user"
+                messages.append({"role": role, "content": msg.content})
+            call_seed = int.from_bytes(os.urandom(4), "big")
+            provider_label = f"ollama ({model_to_use})"
+            try:
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{config.ollama_base_url.rstrip('/')}/api/chat",
+                        json={
+                            "model": model_to_use,
+                            "messages": messages,
+                            "stream": True,
+                            "keep_alive": "15m",
+                            "options": {
+                                "temperature": config.temperature,
+                                "num_predict": config.max_tokens,
+                                "repeat_penalty": 1.18,
+                                "repeat_last_n": 256,
+                                "top_p": 0.92,
+                                "min_p": 0.05,
+                                "seed": call_seed,
+                            },
+                        },
+                    ) as resp:
+                        if resp.status_code == 200:
+                            async for line in resp.aiter_lines():
+                                if not line:
+                                    continue
+                                try:
+                                    chunk = json.loads(line)
+                                except Exception:
+                                    continue
+                                delta = chunk.get("message", {}).get("content", "")
+                                if delta:
+                                    yield delta, provider_label
+                                if chunk.get("done"):
+                                    return
+            except Exception as exc:
+                logger.warning("⚠️ OLLAMA←  | Streaming fallback triggered: %s", exc)
+
+    full_text, provider_used = await generate_roleplay_reply(
+        config=config,
+        character=character,
+        history=history,
+        lore_context=lore_context,
+        triggered_lore=triggered_lore,
+        user_name=user_name,
+        user_desc=user_desc,
+        situation_checkpoint=situation_checkpoint,
+        scene_state=scene_state,
+    )
+    yield full_text, provider_used
 
 
 async def generate_node_text(
