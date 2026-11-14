@@ -826,6 +826,27 @@ def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
         )
         assert unpin_resp.status_code == 200
         assert unpin_resp.json()["asset"]["location_entry_id"] is None
+
+        # 4. Resort world map prompt uses 2D illustrated site plan and strips photorealistic bias
+        resort_world = Lorebook(
+            name="Solana Cove: Sunlit Beach Resort",
+            description="An intimate luxury beachside nudist resort tucked into a warm tropical cove.",
+            aesthetic_style="warm golden hour beachside resort, cinematic photorealistic, 8k",
+            entries=[
+                LoreEntry(
+                    id="res-1",
+                    title="The Luxury Garden Villa",
+                    category="location",
+                    keywords=["villa"],
+                    content="Private garden villa.",
+                )
+            ],
+        )
+        resort_prompt = main_mod._build_world_map_prompt(resort_world)
+        assert "2d illustrated resort map" in resort_prompt.lower()
+        assert "top-down architectural site plan" in resort_prompt.lower()
+        assert "photorealistic" not in resort_prompt.lower()
+        assert "text labels" not in resort_prompt.lower()
     finally:
         main_mod.storage.worlds.pop(world.id, None)
         main_mod.storage.gallery = [

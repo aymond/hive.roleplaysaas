@@ -466,6 +466,7 @@ async def _run_comfyui_bridge(
     seed: int,
     render_mode_override: str | None = None,
     face_detailer_override: bool | None = None,
+    prefer_stylized_non_pony: bool = False,
 ) -> tuple[bytes | None, str]:
     status = await check_comfyui_status(config.comfyui_base_url)
     if not status["online"]:
@@ -476,7 +477,15 @@ async def _run_comfyui_bridge(
     available_ckpts: list[str] = status.get("checkpoints", [])
     face_detectors: list[str] = status.get("face_detectors", [])
     ckpt_to_use = config.comfyui_checkpoint
-    if available_ckpts and ckpt_to_use not in available_ckpts:
+    if prefer_stylized_non_pony and available_ckpts:
+        non_pony = (
+            next((c for c in available_ckpts if "dreamshaper" in c.lower()), None)
+            or next((c for c in available_ckpts if "sd_xl_base" in c.lower()), None)
+            or next((c for c in available_ckpts if "pony" not in c.lower()), None)
+        )
+        if non_pony:
+            ckpt_to_use = non_pony
+    elif available_ckpts and ckpt_to_use not in available_ckpts:
         matched = next(
             (c for c in available_ckpts if ckpt_to_use.lower() in c.lower() or "sd_xl_base" in c.lower()),
             available_ckpts[0],
@@ -879,6 +888,7 @@ async def generate_image_asset(
     seed: int | None = None,
     render_mode_override: str | None = None,
     face_detailer_override: bool | None = None,
+    prefer_stylized_non_pony: bool = False,
 ) -> dict[str, Any]:
     """
     Generates an image using the configured Apple Silicon Image Engine, writes it to output_dir,
@@ -917,6 +927,7 @@ async def generate_image_asset(
             seed=actual_seed,
             render_mode_override=render_mode_override,
             face_detailer_override=face_detailer_override,
+            prefer_stylized_non_pony=prefer_stylized_non_pony,
         )
         if img_bytes:
             provider_used = comfy_label or f"comfyui ({config.comfyui_checkpoint})"

@@ -98,10 +98,13 @@ export const api = {
       `/api/worlds/${worldId}/entries/${entryId}/generate-image`,
       { method: 'POST' }
     ),
-  generateWorldMap: (worldId: string) =>
+  generateWorldMap: (worldId: string, customPrompt?: string) =>
     request<{ world: Lorebook; asset: GalleryAsset }>(
       `/api/worlds/${worldId}/generate-map`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: customPrompt?.trim() ? JSON.stringify({ custom_prompt: customPrompt.trim() }) : undefined,
+      }
     ),
   pinAssetToLocation: (assetId: string, locationEntryId: string | null) =>
     request<{ asset: GalleryAsset }>(`/api/gallery/${assetId}/pin-location`, {

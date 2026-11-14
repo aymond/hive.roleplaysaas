@@ -504,34 +504,98 @@ async def update_world(world_id: str, world: Lorebook) -> Lorebook:
     return world
 
 
+class MapGenerateRequest(BaseModel):
+    custom_prompt: str | None = None
+
+
+def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -> str:
+    loc_titles = [e.title.strip() for e in world.entries if e.category == "location" and e.title.strip()]
+    landmarks = f"featuring {', '.join(loc_titles[:8])}" if loc_titles else ""
+    if custom_prompt and custom_prompt.strip():
+        custom = custom_prompt.strip()
+        if any(k in custom.lower() for k in ("map", "plan", "cartography", "diagram", "blueprint")):
+            return ", ".join(p for p in (custom, landmarks) if p)
+        return ", ".join(
+            p
+            for p in (
+                "top-down 2d illustrated map, overhead bird's-eye cartography site plan, flat vector and watercolor map illustration",
+                custom,
+                landmarks,
+            )
+            if p
+        )
+
+    combined = " ".join(
+        [
+            world.name,
+            world.description,
+            world.aesthetic_style,
+            " ".join(loc_titles),
+        ]
+    ).lower()
+
+    if any(
+        k in combined
+        for k in (
+            "resort",
+            "cove",
+            "beach",
+            "cabana",
+            "villa",
+            "lagoon",
+            "pool",
+            "hotel",
+            "spa",
+            "boardwalk",
+            "island",
+            "coastal",
+            "marina",
+            "harbor",
+        )
+    ):
+        base_style = (
+            "2d illustrated resort map, top-down architectural site plan, overhead bird's-eye tourist directory map, "
+            "flat vector and watercolor illustration, clean stone pathways, palm trees, tropical gardens, beach cabanas, "
+            "villas, swimming pool, sandy coastline, turquoise bay, compass rose, clean map layout"
+        )
+    elif any(k in combined for k in ("cyber", "neon", "station", "orbital", "sci-fi", "sector", "space", "holo")):
+        base_style = (
+            "2d illustrated sci-fi sector map, top-down architectural blueprint and cartography diagram, "
+            "overhead bird's-eye layout, clean pathways, districts, transit lines, compass rose, clean map layout"
+        )
+    else:
+        base_style = (
+            "2d illustrated tabletop RPG world map, top-down cartography parchment map, overhead bird's-eye terrain, "
+            "coastlines, roads, mountains, forests, landmarks, compass rose, clean map layout"
+        )
+
+    return ", ".join(p for p in (base_style, world.name, landmarks) if p)
+
+
 @app.post("/api/worlds/{world_id}/generate-map")
-async def generate_world_map(world_id: str) -> dict[str, Any]:
+async def generate_world_map(
+    world_id: str,
+    req: MapGenerateRequest | None = None,
+) -> dict[str, Any]:
     world = storage.worlds.get(world_id)
     if not world:
         raise HTTPException(status_code=404, detail="World not found")
 
-    loc_titles = [e.title for e in world.entries if e.category == "location" and e.title.strip()]
-    loc_snippet = f"featuring landmarks {', '.join(loc_titles[:8])}" if loc_titles else ""
-    map_prompt = ", ".join(
-        p
-        for p in (
-            "top-down illustrated cartography world map, rich parchment and painterly terrain, coastlines, roads, landmarks, compass rose, no random text labels, masterpiece, 8k",
-            world.name,
-            world.description[:140] if world.description else "",
-            loc_snippet,
-            world.aesthetic_style,
-        )
-        if p
-    )
+    map_prompt = _build_world_map_prompt(world, req.custom_prompt if req else None)
     img_meta = await generate_image_asset(
         config=storage.config,
         output_dir=storage.generated_dir,
         prompt=map_prompt,
-        negative_prompt="blurry, low quality, deformed, portrait, person, woman, man, close-up face, watermark",
+        negative_prompt=(
+            "photorealistic, photo, photograph, 3d render, horizon, sky, eye-level view, street level, "
+            "person, woman, man, people, portrait, close-up face, text, letters, words, watermark, "
+            "blurry, low quality, deformed"
+        ),
         width=1024,
         height=768,
         render_mode_override="single_stylized",
         face_detailer_override=False,
+        prefer_stylized_non_pony=True,
     )
     world.map_image_url = img_meta["url"]
     world.map_prompt = map_prompt
