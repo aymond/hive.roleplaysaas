@@ -153,6 +153,21 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
     }
   };
 
+  const handleDeleteWorld = async (worldId: string, worldName: string) => {
+    if (!window.confirm(`Delete world "${worldName}"? This cannot be undone.`)) return;
+    await api.deleteWorld(worldId);
+    const next = worlds.filter((w) => w.id !== worldId);
+    onWorldsUpdated(next);
+    if (selectedWorldId === worldId) {
+      const fallback = next[0] || null;
+      setSelectedWorldId(fallback?.id || '');
+      setDraftWorld(fallback ? JSON.parse(JSON.stringify(fallback)) : null);
+      setSelectedLocationId(null);
+      setRepositioningLocId(null);
+      setPinPickerOpen(false);
+    }
+  };
+
   const handleAddEntry = () => {
     if (!draftWorld) return;
     const newEntry: LoreEntry = {
@@ -238,13 +253,27 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
               <div
                 key={w.id}
                 onClick={() => selectWorld(w)}
-                className={`p-3.5 rounded-2xl border cursor-pointer transition space-y-1.5 ${
+                className={`p-3.5 rounded-2xl border cursor-pointer transition space-y-1.5 group ${
                   isSelected
                     ? 'bg-emerald-500/15 border-emerald-500/50 text-white'
                     : 'bg-[#121622]/80 border-white/10 hover:border-white/25 text-slate-200'
                 }`}
               >
-                <div className="text-sm font-bold">{w.name}</div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-sm font-bold">{w.name}</div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteWorld(w.id, w.name);
+                    }}
+                    className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-70 group-hover:opacity-100 transition cursor-pointer shrink-0"
+                    title={`Delete ${w.name}`}
+                    aria-label={`Delete ${w.name}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
                 <div className="text-xs text-emerald-300/90">{w.subtitle}</div>
                 <p className="text-[11px] text-slate-400 line-clamp-2">{w.description}</p>
                 <div className="pt-1 flex items-center gap-2 text-[11px] text-slate-400">
@@ -299,6 +328,15 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
                 >
                   {savedToast ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
                   {savedToast ? 'Saved!' : saving ? 'Saving...' : 'Save World Codex'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteWorld(draftWorld.id, draftWorld.name)}
+                  className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                  title="Delete this world permanently"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete
                 </button>
               </div>
             </div>
