@@ -850,8 +850,8 @@ def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
             ],
         )
         resort_prompt = main_mod._build_world_map_prompt(resort_world)
-        assert "2d illustrated top-down resort map" in resort_prompt.lower()
-        assert "bird's-eye architectural site plan" in resort_prompt.lower()
+        assert "top-down aerial resort map" in resort_prompt.lower()
+        assert "realistic architectural masterplan site view" in resort_prompt.lower()
         assert "tropical cove" in resort_prompt.lower()
         assert "hedge garden" in resort_prompt.lower()
         assert "turquoise lagoon" in resort_prompt.lower()

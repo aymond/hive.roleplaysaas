@@ -602,6 +602,101 @@ def _build_hybrid_with_facedetailer(
     return b.build()
 
 
+def build_world_map() -> dict[str, Any]:
+    b = ComfyUIWorkflowBuilder()
+    ckpt = b.add_node(
+        "CheckpointLoaderSimple",
+        (40, 140),
+        (330, 98),
+        [],
+        [("MODEL", "MODEL"), ("CLIP", "CLIP"), ("VAE", "VAE")],
+        ["DreamShaperXL_Turbo_v2_1.safetensors"],
+    )
+    clip_skip = b.add_node(
+        "CLIPSetLastLayer",
+        (420, 260),
+        (260, 58),
+        [("clip", "CLIP")],
+        [("CLIP", "CLIP")],
+        [-1],
+    )
+    b.connect(ckpt, 1, clip_skip, 0)
+
+    latent = b.add_node(
+        "EmptyLatentImage",
+        (420, 60),
+        (260, 106),
+        [],
+        [("LATENT", "LATENT")],
+        [1024, 768, 1],
+    )
+    pos = b.add_node(
+        "CLIPTextEncode",
+        (730, 180),
+        (340, 120),
+        [("clip", "CLIP")],
+        [("CONDITIONING", "CONDITIONING")],
+        [
+            "top-down aerial resort map, realistic architectural masterplan site view, "
+            "private garden villa surrounded by large hedge garden and green grass, "
+            "private teakwood cabana overlooking warm turquoise lagoon, "
+            "beachside resort tropical cove with private oceanfront cabanas, sunset infinity pools, "
+            "clean pathways, palm trees, realistic lighting, compass rose"
+        ],
+        title="World Map Positive Prompt",
+    )
+    neg = b.add_node(
+        "CLIPTextEncode",
+        (730, 340),
+        (340, 120),
+        [("clip", "CLIP")],
+        [("CONDITIONING", "CONDITIONING")],
+        [
+            "horizon, sky, eye-level view, street level, ground level, person, woman, man, people, "
+            "portrait, close-up face, text, letters, words, watermark, cartoon, anime, sketch, "
+            "blurry, low quality, deformed"
+        ],
+        title="World Map Negative Prompt",
+    )
+    b.connect(clip_skip, 0, pos, 0)
+    b.connect(clip_skip, 0, neg, 0)
+
+    sampler = b.add_node(
+        "KSampler",
+        (1120, 120),
+        (315, 262),
+        [("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
+        [("LATENT", "LATENT")],
+        [4200, "randomize", 8, 2.2, "dpmpp_sde", "karras", 1.0],
+    )
+    b.connect(ckpt, 0, sampler, 0)
+    b.connect(pos, 0, sampler, 1)
+    b.connect(neg, 0, sampler, 2)
+    b.connect(latent, 0, sampler, 3)
+
+    dec = b.add_node(
+        "VAEDecode",
+        (1480, 120),
+        (210, 46),
+        [("samples", "LATENT"), ("vae", "VAE")],
+        [("IMAGE", "IMAGE")],
+        [],
+    )
+    b.connect(sampler, 0, dec, 0)
+    b.connect(ckpt, 2, dec, 1)
+
+    save = b.add_node(
+        "SaveImage",
+        (1740, 120),
+        (280, 270),
+        [("images", "IMAGE")],
+        [],
+        ["Hivemind_WorldMap"],
+    )
+    b.connect(dec, 0, save, 0)
+    return b.build()
+
+
 def get_all_workflows() -> dict[str, dict[str, Any]]:
     return {
         "Hivemind_1_Single_Base.json": build_single_base(),
@@ -634,6 +729,7 @@ def get_all_workflows() -> dict[str, dict[str, Any]]:
             face_sampler="dpmpp_sde",
             save_prefix="Hivemind_HybridRefiner",
         ),
+        "Hivemind_5_World_Map.json": build_world_map(),
     }
 
 

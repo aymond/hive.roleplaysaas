@@ -527,16 +527,16 @@ _MAP_STRIP_PHRASES = (
     "luxury",
     "tucked into",
     "where silk curtains billow in the evening sea breeze and",
-    "overlooking the",
-    "surrounded by a",
     "well maintained",
+    "an ",
+    "a ",
 )
 
 
 def _clean_map_text(text: str, max_words: int = 12) -> str:
-    cleaned = text.strip()
+    cleaned = f" {text.strip()} "
     for phrase in _MAP_STRIP_PHRASES:
-        cleaned = re.sub(re.escape(phrase), " ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(rf"(?<!\w){re.escape(phrase)}(?!\w)", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:-")
     words = cleaned.split()
     if len(words) > max_words:
@@ -552,38 +552,39 @@ def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -
         reverse=True,
     )
 
-    landmark_parts: list[str] = []
+    # Put location descriptions FIRST (highest CLIP token weight)
+    location_phrases: list[str] = []
     for entry in location_entries[:5]:
         title = entry.title.strip()
         detail_src = entry.content.strip() or getattr(entry, "visual_description", "").strip()
-        detail = _clean_map_text(detail_src, max_words=10)
+        detail = _clean_map_text(detail_src, max_words=12)
         if detail and detail.lower() not in title.lower():
-            landmark_parts.append(f"{title} ({detail})")
+            location_phrases.append(detail)
         else:
-            landmark_parts.append(title)
+            location_phrases.append(title)
 
-    # Also include non-location enabled lore entries if they add distinct world features
-    if len(landmark_parts) < 5:
+    # Include non-location enabled lore entries if fewer than 5 locations
+    if len(location_phrases) < 5:
         other_entries = [e for e in enabled_entries if e.category != "location" and e.title.strip()]
-        for entry in other_entries[: 5 - len(landmark_parts)]:
-            detail = _clean_map_text(entry.content.strip(), max_words=7)
+        for entry in other_entries[: 5 - len(location_phrases)]:
+            detail = _clean_map_text(entry.content.strip(), max_words=8)
             if detail:
-                landmark_parts.append(f"{entry.title.strip()} ({detail})")
+                location_phrases.append(detail)
 
-    landmarks = f"landmarks: {', '.join(landmark_parts)}" if landmark_parts else ""
-    codex_geo = _clean_map_text(world.description, max_words=14) if world.description else ""
+    landmarks = ", ".join(location_phrases)
+    codex_geo = _clean_map_text(world.description, max_words=12) if world.description else ""
 
     if custom_prompt and custom_prompt.strip():
         custom = custom_prompt.strip()
         if any(k in custom.lower() for k in ("map", "plan", "cartography", "diagram", "blueprint")):
-            return ", ".join(p for p in (custom, codex_geo, landmarks) if p)
+            return ", ".join(p for p in (custom, landmarks, codex_geo) if p)
         return ", ".join(
             p
             for p in (
-                "2d illustrated top-down map, bird's-eye architectural site plan, watercolor vector cartography",
+                "top-down aerial map, realistic architectural site plan",
                 custom,
-                codex_geo,
                 landmarks,
+                codex_geo,
             )
             if p
         )
@@ -617,16 +618,16 @@ def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -
             "harbor",
         )
     ):
-        base_style = "2d illustrated top-down resort map, bird's-eye architectural site plan, watercolor vector cartography"
-        closing = "clean pathways, palm trees, compass rose"
+        base_style = "top-down aerial resort map, realistic architectural masterplan site view"
+        closing = "clean pathways, palm trees, realistic lighting, compass rose"
     elif any(k in combined for k in ("cyber", "neon", "station", "orbital", "sci-fi", "sector", "space", "holo")):
-        base_style = "2d illustrated top-down sci-fi sector map, bird's-eye architectural blueprint, clean vector cartography"
+        base_style = "top-down tactical sector map, realistic architectural overhead plan"
         closing = "transit lines, districts, compass rose"
     else:
-        base_style = "2d illustrated top-down world map, bird's-eye tabletop RPG cartography, watercolor parchment"
+        base_style = "top-down cartographic map, realistic terrain relief, overhead satellite view"
         closing = "roads, terrain, compass rose"
 
-    return ", ".join(p for p in (base_style, world.name, codex_geo, landmarks, closing) if p)
+    return ", ".join(p for p in (base_style, landmarks, codex_geo, closing) if p)
 
 
 @app.post("/api/worlds/{world_id}/generate-map")
@@ -644,8 +645,8 @@ async def generate_world_map(
         output_dir=storage.generated_dir,
         prompt=map_prompt,
         negative_prompt=(
-            "photorealistic, photo, photograph, 3d render, horizon, sky, eye-level view, street level, "
-            "person, woman, man, people, portrait, close-up face, text, letters, words, watermark, "
+            "horizon, sky, eye-level view, street level, ground level, person, woman, man, people, "
+            "portrait, close-up face, text, letters, words, watermark, cartoon, anime, sketch, "
             "blurry, low quality, deformed"
         ),
         width=1024,
