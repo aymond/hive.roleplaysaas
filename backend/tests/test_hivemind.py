@@ -827,10 +827,10 @@ def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
         assert unpin_resp.status_code == 200
         assert unpin_resp.json()["asset"]["location_entry_id"] is None
 
-        # 4. Resort world map prompt uses 2D illustrated site plan and strips photorealistic bias
+        # 4. Resort world map prompt uses 2D illustrated site plan, incorporates Codex & lore details, and strips photorealistic bias
         resort_world = Lorebook(
             name="Solana Cove: Sunlit Beach Resort",
-            description="An intimate luxury beachside nudist resort tucked into a warm tropical cove.",
+            description="An intimate luxury beachside nudist resort tucked into a warm tropical cove with infinity pools.",
             aesthetic_style="warm golden hour beachside resort, cinematic photorealistic, 8k",
             entries=[
                 LoreEntry(
@@ -838,13 +838,23 @@ def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
                     title="The Luxury Garden Villa",
                     category="location",
                     keywords=["villa"],
-                    content="Private garden villa.",
-                )
+                    content="A private garden villa surrounded by a large hedge garden.",
+                ),
+                LoreEntry(
+                    id="res-2",
+                    title="The Sunset Cabana & Lagoon",
+                    category="location",
+                    keywords=["cabana", "lagoon"],
+                    content="A private teakwood cabana overlooking the warm turquoise lagoon.",
+                ),
             ],
         )
         resort_prompt = main_mod._build_world_map_prompt(resort_world)
-        assert "2d illustrated resort map" in resort_prompt.lower()
-        assert "top-down architectural site plan" in resort_prompt.lower()
+        assert "2d illustrated top-down resort map" in resort_prompt.lower()
+        assert "bird's-eye architectural site plan" in resort_prompt.lower()
+        assert "tropical cove" in resort_prompt.lower()
+        assert "hedge garden" in resort_prompt.lower()
+        assert "turquoise lagoon" in resort_prompt.lower()
         assert "photorealistic" not in resort_prompt.lower()
         assert "text labels" not in resort_prompt.lower()
     finally:

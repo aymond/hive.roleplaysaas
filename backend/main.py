@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -508,18 +509,80 @@ class MapGenerateRequest(BaseModel):
     custom_prompt: str | None = None
 
 
+_MAP_STRIP_PHRASES = (
+    "cinematic photorealistic",
+    "photorealistic",
+    "dramatic concept art",
+    "atmospheric lighting",
+    "detailed architecture",
+    "warm golden hour",
+    "golden hour",
+    "sunset rim lighting",
+    "8k",
+    "4k",
+    "nudist",
+    "naked",
+    "intimate",
+    "romantic",
+    "luxury",
+    "tucked into",
+    "where silk curtains billow in the evening sea breeze and",
+    "overlooking the",
+    "surrounded by a",
+    "well maintained",
+)
+
+
+def _clean_map_text(text: str, max_words: int = 12) -> str:
+    cleaned = text.strip()
+    for phrase in _MAP_STRIP_PHRASES:
+        cleaned = re.sub(re.escape(phrase), " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.;:-")
+    words = cleaned.split()
+    if len(words) > max_words:
+        cleaned = " ".join(words[:max_words]).rstrip(" ,.;:-")
+    return cleaned
+
+
 def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -> str:
-    loc_titles = [e.title.strip() for e in world.entries if e.category == "location" and e.title.strip()]
-    landmarks = f"featuring {', '.join(loc_titles[:8])}" if loc_titles else ""
+    enabled_entries = [e for e in world.entries if getattr(e, "enabled", True)]
+    location_entries = sorted(
+        [e for e in enabled_entries if e.category == "location" and e.title.strip()],
+        key=lambda e: getattr(e, "priority", 0),
+        reverse=True,
+    )
+
+    landmark_parts: list[str] = []
+    for entry in location_entries[:5]:
+        title = entry.title.strip()
+        detail_src = entry.content.strip() or getattr(entry, "visual_description", "").strip()
+        detail = _clean_map_text(detail_src, max_words=10)
+        if detail and detail.lower() not in title.lower():
+            landmark_parts.append(f"{title} ({detail})")
+        else:
+            landmark_parts.append(title)
+
+    # Also include non-location enabled lore entries if they add distinct world features
+    if len(landmark_parts) < 5:
+        other_entries = [e for e in enabled_entries if e.category != "location" and e.title.strip()]
+        for entry in other_entries[: 5 - len(landmark_parts)]:
+            detail = _clean_map_text(entry.content.strip(), max_words=7)
+            if detail:
+                landmark_parts.append(f"{entry.title.strip()} ({detail})")
+
+    landmarks = f"landmarks: {', '.join(landmark_parts)}" if landmark_parts else ""
+    codex_geo = _clean_map_text(world.description, max_words=14) if world.description else ""
+
     if custom_prompt and custom_prompt.strip():
         custom = custom_prompt.strip()
         if any(k in custom.lower() for k in ("map", "plan", "cartography", "diagram", "blueprint")):
-            return ", ".join(p for p in (custom, landmarks) if p)
+            return ", ".join(p for p in (custom, codex_geo, landmarks) if p)
         return ", ".join(
             p
             for p in (
-                "top-down 2d illustrated map, overhead bird's-eye cartography site plan, flat vector and watercolor map illustration",
+                "2d illustrated top-down map, bird's-eye architectural site plan, watercolor vector cartography",
                 custom,
+                codex_geo,
                 landmarks,
             )
             if p
@@ -530,7 +593,8 @@ def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -
             world.name,
             world.description,
             world.aesthetic_style,
-            " ".join(loc_titles),
+            " ".join(e.title for e in enabled_entries),
+            " ".join(e.content for e in enabled_entries[:6]),
         ]
     ).lower()
 
@@ -553,23 +617,16 @@ def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -
             "harbor",
         )
     ):
-        base_style = (
-            "2d illustrated resort map, top-down architectural site plan, overhead bird's-eye tourist directory map, "
-            "flat vector and watercolor illustration, clean stone pathways, palm trees, tropical gardens, beach cabanas, "
-            "villas, swimming pool, sandy coastline, turquoise bay, compass rose, clean map layout"
-        )
+        base_style = "2d illustrated top-down resort map, bird's-eye architectural site plan, watercolor vector cartography"
+        closing = "clean pathways, palm trees, compass rose"
     elif any(k in combined for k in ("cyber", "neon", "station", "orbital", "sci-fi", "sector", "space", "holo")):
-        base_style = (
-            "2d illustrated sci-fi sector map, top-down architectural blueprint and cartography diagram, "
-            "overhead bird's-eye layout, clean pathways, districts, transit lines, compass rose, clean map layout"
-        )
+        base_style = "2d illustrated top-down sci-fi sector map, bird's-eye architectural blueprint, clean vector cartography"
+        closing = "transit lines, districts, compass rose"
     else:
-        base_style = (
-            "2d illustrated tabletop RPG world map, top-down cartography parchment map, overhead bird's-eye terrain, "
-            "coastlines, roads, mountains, forests, landmarks, compass rose, clean map layout"
-        )
+        base_style = "2d illustrated top-down world map, bird's-eye tabletop RPG cartography, watercolor parchment"
+        closing = "roads, terrain, compass rose"
 
-    return ", ".join(p for p in (base_style, world.name, landmarks) if p)
+    return ", ".join(p for p in (base_style, world.name, codex_geo, landmarks, closing) if p)
 
 
 @app.post("/api/worlds/{world_id}/generate-map")
