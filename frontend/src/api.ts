@@ -98,6 +98,16 @@ export const api = {
       `/api/worlds/${worldId}/entries/${entryId}/generate-image`,
       { method: 'POST' }
     ),
+  generateWorldMap: (worldId: string) =>
+    request<{ world: Lorebook; asset: GalleryAsset }>(
+      `/api/worlds/${worldId}/generate-map`,
+      { method: 'POST' }
+    ),
+  pinAssetToLocation: (assetId: string, locationEntryId: string | null) =>
+    request<{ asset: GalleryAsset }>(`/api/gallery/${assetId}/pin-location`, {
+      method: 'POST',
+      body: JSON.stringify({ location_entry_id: locationEntryId }),
+    }),
 
   // Roleplay Chats
   listChats: () => request<ChatSession[]>('/api/chats'),

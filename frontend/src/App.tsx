@@ -226,6 +226,7 @@ export const App: React.FC = () => {
             {activeTab === 'worlds' && (
               <WorldCodex
                 worlds={worlds}
+                gallery={gallery}
                 onWorldsUpdated={setWorlds}
                 onGalleryUpdated={refreshGallery}
               />

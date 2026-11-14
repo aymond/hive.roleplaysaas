@@ -38,6 +38,8 @@ export interface LoreEntry {
   content: string;
   visual_description: string;
   image_url: string;
+  map_x?: number | null;
+  map_y?: number | null;
   constant: boolean;
   enabled: boolean;
   priority: number;
@@ -49,6 +51,8 @@ export interface Lorebook {
   subtitle: string;
   description: string;
   aesthetic_style: string;
+  map_image_url?: string;
+  map_prompt?: string;
   entries: LoreEntry[];
   created_at?: string;
   updated_at?: string;
@@ -232,6 +236,7 @@ export interface GalleryAsset {
   seed: number;
   character_id?: string | null;
   world_id?: string | null;
+  location_entry_id?: string | null;
   workflow_id?: string | null;
   duration_ms?: number | null;
   created_at: string;

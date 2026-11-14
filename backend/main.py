@@ -418,6 +418,66 @@ async def import_character_card(file: UploadFile = File(...)) -> CharacterCard:
 # --- World Codex / Lorebook Endpoints ---
 
 
+def _auto_place_map_locations(world: Lorebook) -> None:
+    """Assigns spaced (map_x, map_y) percentage coordinates to location entries that lack them."""
+    existing_coords = [
+        (e.map_x, e.map_y)
+        for e in world.entries
+        if e.category == "location" and e.map_x is not None and e.map_y is not None
+    ]
+    # Candidate grid positions (percentage 0-100) avoiding map borders
+    candidates = [
+        (50.0, 48.0), (28.0, 34.0), (72.0, 34.0), (30.0, 68.0), (70.0, 68.0),
+        (50.0, 24.0), (50.0, 76.0), (20.0, 50.0), (80.0, 50.0), (38.0, 48.0),
+        (62.0, 48.0), (38.0, 26.0), (62.0, 26.0), (38.0, 74.0), (62.0, 74.0),
+        (22.0, 22.0), (78.0, 22.0), (22.0, 78.0), (78.0, 78.0),
+    ]
+    for entry in world.entries:
+        if entry.category != "location":
+            continue
+        if entry.map_x is not None and entry.map_y is not None:
+            continue
+        best = None
+        best_dist = -1.0
+        for cx, cy in candidates:
+            if not existing_coords:
+                best = (cx, cy)
+                break
+            min_d = min(((cx - ex) ** 2 + (cy - ey) ** 2) ** 0.5 for ex, ey in existing_coords)
+            if min_d > best_dist:
+                best_dist = min_d
+                best = (cx, cy)
+        px, py = best or (50.0, 50.0)
+        entry.map_x = round(px, 1)
+        entry.map_y = round(py, 1)
+        existing_coords.append((entry.map_x, entry.map_y))
+
+
+def _resolve_location_entry_id(
+    world: Lorebook | None,
+    triggered_lore: list[Any],
+    scene_location: str = "",
+) -> str | None:
+    """Finds the best matching location LoreEntry id for auto-pinning a generated photo to the world map."""
+    if not world:
+        return None
+    loc_entries = [e for e in world.entries if e.category == "location"]
+    if not loc_entries:
+        return None
+    loc_by_id = {e.id: e for e in loc_entries}
+    for t in triggered_lore or []:
+        tid = getattr(t, "entry_id", None) or (t.get("entry_id") if isinstance(t, dict) else None)
+        if tid and tid in loc_by_id:
+            return tid
+    loc_l = (scene_location or "").strip().lower()
+    if loc_l:
+        for e in loc_entries:
+            title_l = e.title.lower()
+            if title_l in loc_l or loc_l in title_l or any(k.lower() in loc_l for k in e.keys if len(k) >= 3):
+                return e.id
+    return None
+
+
 @app.get("/api/worlds")
 async def list_worlds() -> list[Lorebook]:
     return list(storage.worlds.values())
@@ -426,6 +486,8 @@ async def list_worlds() -> list[Lorebook]:
 @app.post("/api/worlds")
 async def create_world(world: Lorebook) -> Lorebook:
     world.updated_at = utc_now_iso()
+    if world.map_image_url:
+        _auto_place_map_locations(world)
     storage.worlds[world.id] = world
     storage.save()
     return world
@@ -434,10 +496,75 @@ async def create_world(world: Lorebook) -> Lorebook:
 @app.put("/api/worlds/{world_id}")
 async def update_world(world_id: str, world: Lorebook) -> Lorebook:
     world.id = world_id
+    if world.map_image_url:
+        _auto_place_map_locations(world)
     world.updated_at = utc_now_iso()
     storage.worlds[world_id] = world
     storage.save()
     return world
+
+
+@app.post("/api/worlds/{world_id}/generate-map")
+async def generate_world_map(world_id: str) -> dict[str, Any]:
+    world = storage.worlds.get(world_id)
+    if not world:
+        raise HTTPException(status_code=404, detail="World not found")
+
+    loc_titles = [e.title for e in world.entries if e.category == "location" and e.title.strip()]
+    loc_snippet = f"featuring landmarks {', '.join(loc_titles[:8])}" if loc_titles else ""
+    map_prompt = ", ".join(
+        p
+        for p in (
+            "top-down illustrated cartography world map, rich parchment and painterly terrain, coastlines, roads, landmarks, compass rose, no random text labels, masterpiece, 8k",
+            world.name,
+            world.description[:140] if world.description else "",
+            loc_snippet,
+            world.aesthetic_style,
+        )
+        if p
+    )
+    img_meta = await generate_image_asset(
+        config=storage.config,
+        output_dir=storage.generated_dir,
+        prompt=map_prompt,
+        negative_prompt="blurry, low quality, deformed, portrait, person, woman, man, close-up face, watermark",
+        width=1024,
+        height=768,
+        render_mode_override="single_stylized",
+        face_detailer_override=False,
+    )
+    world.map_image_url = img_meta["url"]
+    world.map_prompt = map_prompt
+    _auto_place_map_locations(world)
+    world.updated_at = utc_now_iso()
+
+    asset = GalleryAsset(
+        url=img_meta["url"],
+        prompt=map_prompt,
+        provider=img_meta["provider"],
+        width=img_meta["width"],
+        height=img_meta["height"],
+        seed=img_meta["seed"],
+        world_id=world.id,
+        duration_ms=img_meta.get("duration_ms"),
+    )
+    storage.gallery.insert(0, asset)
+    storage.save()
+    return {"world": world.model_dump(), "asset": asset.model_dump()}
+
+
+class PinLocationRequest(BaseModel):
+    location_entry_id: str | None = None
+
+
+@app.post("/api/gallery/{asset_id}/pin-location")
+async def pin_gallery_asset_to_location(asset_id: str, req: PinLocationRequest) -> dict[str, Any]:
+    target = next((g for g in storage.gallery if g.id == asset_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Gallery asset not found")
+    target.location_entry_id = req.location_entry_id
+    storage.save()
+    return {"asset": target.model_dump()}
 
 
 @app.delete("/api/worlds/{world_id}")
@@ -500,6 +627,7 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
         height=img_meta["height"],
         seed=img_meta["seed"],
         world_id=world.id,
+        location_entry_id=target_entry.id if target_entry.category == "location" else None,
     )
     storage.gallery.insert(0, asset)
     storage.save()
@@ -1015,6 +1143,11 @@ async def illustrate_chat_message(
     target_msg.timings = {**(target_msg.timings or {}), **scene_timings}
     _record_metric("scene", {"provider": img_meta["provider"], **scene_timings})
 
+    matched_loc_id = _resolve_location_entry_id(
+        world,
+        lore_res.triggered,
+        scene_location=session.scene_state.location if session.scene_state else "",
+    )
     asset = GalleryAsset(
         url=img_meta["url"],
         prompt=full_prompt,
@@ -1024,6 +1157,7 @@ async def illustrate_chat_message(
         seed=img_meta["seed"],
         character_id=card.id if card else None,
         world_id=session.world_id,
+        location_entry_id=matched_loc_id,
         duration_ms=img_meta.get("duration_ms"),
     )
     storage.gallery.insert(0, asset)
@@ -1338,6 +1472,11 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
     }
     _record_metric("studio", {"provider": img_meta["provider"], **studio_timings})
 
+    matched_loc_id = _resolve_location_entry_id(
+        world,
+        triggered_lore_list,
+        scene_location=(session.scene_state.location if (session and session.scene_state) else req.custom_prompt),
+    )
     asset = GalleryAsset(
         url=img_meta["url"],
         prompt=assembled_prompt,
@@ -1348,6 +1487,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         seed=img_meta["seed"],
         character_id=card.id if card else None,
         world_id=world.id if world else None,
+        location_entry_id=matched_loc_id,
         duration_ms=img_meta.get("duration_ms"),
     )
     storage.gallery.insert(0, asset)

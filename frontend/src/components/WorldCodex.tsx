@@ -13,12 +13,17 @@ import {
   Gem,
   Users,
   Check,
+  Map as MapIcon,
+  Image as ImageIcon,
+  Move,
+  X,
 } from 'lucide-react';
 import { api } from '../api';
-import type { Lorebook, LoreCategory, LoreEntry, TriggeredLoreInfo } from '../types';
+import type { GalleryAsset, Lorebook, LoreCategory, LoreEntry, TriggeredLoreInfo } from '../types';
 
 interface WorldCodexProps {
   worlds: Lorebook[];
+  gallery: GalleryAsset[];
   onWorldsUpdated: (worlds: Lorebook[]) => void;
   onGalleryUpdated: () => void;
 }
@@ -35,6 +40,7 @@ const CATEGORY_META: Record<LoreCategory, { label: string; color: string; icon: 
 
 export const WorldCodex: React.FC<WorldCodexProps> = ({
   worlds,
+  gallery,
   onWorldsUpdated,
   onGalleryUpdated,
 }) => {
@@ -43,6 +49,10 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
   const [saving, setSaving] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
   const [renderingEntryId, setRenderingEntryId] = useState<string | null>(null);
+  const [generatingMap, setGeneratingMap] = useState(false);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [repositioningLocId, setRepositioningLocId] = useState<string | null>(null);
+  const [pinPickerOpen, setPinPickerOpen] = useState(false);
 
   // Lore Scanner Testbench state
   const [scanInput, setScanInput] = useState(
@@ -58,6 +68,47 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
     setSelectedWorldId(w.id);
     setDraftWorld(JSON.parse(JSON.stringify(w)));
     setScanResult(null);
+    setSelectedLocationId(null);
+    setRepositioningLocId(null);
+    setPinPickerOpen(false);
+  };
+
+  const handleGenerateMap = async () => {
+    if (!draftWorld || generatingMap) return;
+    setGeneratingMap(true);
+    try {
+      await api.updateWorld(draftWorld.id, draftWorld);
+      const res = await api.generateWorldMap(draftWorld.id);
+      const next = worlds.map((w) => (w.id === res.world.id ? res.world : w));
+      onWorldsUpdated(next);
+      setDraftWorld(JSON.parse(JSON.stringify(res.world)));
+      onGalleryUpdated();
+    } finally {
+      setGeneratingMap(false);
+    }
+  };
+
+  const handleMapClick = async (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!draftWorld || !repositioningLocId) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(5, Math.min(95, Number((((e.clientX - rect.left) / rect.width) * 100).toFixed(1))));
+    const y = Math.max(5, Math.min(95, Number((((e.clientY - rect.top) / rect.height) * 100).toFixed(1))));
+    const nextWorld: Lorebook = {
+      ...draftWorld,
+      entries: draftWorld.entries.map((entry) =>
+        entry.id === repositioningLocId ? { ...entry, map_x: x, map_y: y } : entry
+      ),
+    };
+    setDraftWorld(nextWorld);
+    setRepositioningLocId(null);
+    const updated = await api.updateWorld(nextWorld.id, nextWorld);
+    onWorldsUpdated(worlds.map((w) => (w.id === updated.id ? updated : w)));
+    setDraftWorld(JSON.parse(JSON.stringify(updated)));
+  };
+
+  const handlePinPhotoToLocation = async (assetId: string, locationEntryId: string | null) => {
+    await api.pinAssetToLocation(assetId, locationEntryId);
+    onGalleryUpdated();
   };
 
   const handleCreateWorld = async () => {
@@ -220,6 +271,20 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={handleGenerateMap}
+                  disabled={generatingMap}
+                  className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/30 text-cyan-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Generate or regenerate the base cartographic world map image in ComfyUI"
+                >
+                  <MapIcon className="w-3.5 h-3.5" />
+                  {generatingMap
+                    ? 'Generating Map...'
+                    : draftWorld.map_image_url
+                    ? 'Regenerate Base Map'
+                    : 'Generate World Map'}
+                </button>
+                <button
+                  type="button"
                   onClick={handleAddEntry}
                   className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
@@ -237,6 +302,214 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Interactive World Map & Location Photo Pins */}
+            {(() => {
+              const locationEntries = draftWorld.entries.filter((e) => e.category === 'location');
+              const selectedLoc =
+                locationEntries.find((e) => e.id === selectedLocationId) || null;
+              const pinnedPhotos = selectedLoc
+                ? gallery.filter((g) => g.location_entry_id === selectedLoc.id)
+                : [];
+              const worldGalleryCandidates = gallery.filter(
+                (g) => !g.world_id || g.world_id === draftWorld.id
+              );
+
+              return (
+                <div className="bg-[#111520] p-4 rounded-2xl border border-cyan-500/20 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <MapIcon className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-cyan-300">
+                        Interactive World Map ({locationEntries.length} Locations)
+                      </span>
+                    </div>
+                    {repositioningLocId && (
+                      <span className="text-xs text-amber-300 animate-pulse font-medium">
+                        Click anywhere on the map to place "{locationEntries.find((l) => l.id === repositioningLocId)?.title}"
+                      </span>
+                    )}
+                  </div>
+
+                  {draftWorld.map_image_url ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                      <div
+                        onClick={handleMapClick}
+                        className={`lg:col-span-8 relative rounded-xl overflow-hidden border border-white/15 bg-black select-none ${
+                          repositioningLocId ? 'cursor-crosshair ring-2 ring-amber-400/60' : ''
+                        }`}
+                      >
+                        <img
+                          src={draftWorld.map_image_url}
+                          alt={`${draftWorld.name} Map`}
+                          className="w-full h-auto block"
+                        />
+                        {locationEntries.map((loc) => {
+                          const px = loc.map_x ?? 50;
+                          const py = loc.map_y ?? 50;
+                          const photoCount = gallery.filter(
+                            (g) => g.location_entry_id === loc.id
+                          ).length;
+                          const isSel = selectedLocationId === loc.id;
+                          return (
+                            <button
+                              key={loc.id}
+                              type="button"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                if (repositioningLocId) return;
+                                setSelectedLocationId(loc.id);
+                                setPinPickerOpen(false);
+                              }}
+                              style={{ left: `${px}%`, top: `${py}%` }}
+                              className={`absolute -translate-x-1/2 -translate-y-1/2 px-2 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1 shadow-lg border transition cursor-pointer ${
+                                isSel
+                                  ? 'bg-amber-500 text-slate-950 border-white scale-110 z-20'
+                                  : 'bg-[#0b0e16]/90 text-emerald-200 border-emerald-400/60 hover:border-amber-400 z-10'
+                              }`}
+                              title={`${loc.title} (${photoCount} pinned photo${photoCount === 1 ? '' : 's'})`}
+                            >
+                              <MapPin className="w-3 h-3 shrink-0" />
+                              <span className="max-w-[110px] truncate">{loc.title}</span>
+                              {photoCount > 0 && (
+                                <span className="px-1.5 py-0.2 rounded-full bg-black/40 text-[10px] font-mono">
+                                  {photoCount}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="lg:col-span-4 bg-[#0b0e16] rounded-xl border border-white/10 p-3 space-y-3">
+                        {selectedLoc ? (
+                          <>
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="text-sm font-bold text-white flex items-center gap-1.5">
+                                  <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                                  {selectedLoc.title}
+                                </div>
+                                <div className="text-[11px] text-slate-400">
+                                  Pin: ({selectedLoc.map_x ?? 50}%, {selectedLoc.map_y ?? 50}%)
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setRepositioningLocId(
+                                    repositioningLocId === selectedLoc.id ? null : selectedLoc.id
+                                  )
+                                }
+                                className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 border cursor-pointer ${
+                                  repositioningLocId === selectedLoc.id
+                                    ? 'bg-amber-500 text-slate-950 border-amber-300'
+                                    : 'bg-white/5 hover:bg-white/10 text-slate-200 border-white/15'
+                                }`}
+                                title="Click to move this location's pin on the original map"
+                              >
+                                <Move className="w-3 h-3" />
+                                {repositioningLocId === selectedLoc.id ? 'Click Map...' : 'Move Pin'}
+                              </button>
+                            </div>
+
+                            <p className="text-xs text-slate-300 line-clamp-3">
+                              {selectedLoc.content}
+                            </p>
+
+                            <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                              <span className="text-[11px] font-semibold text-cyan-300 flex items-center gap-1">
+                                <ImageIcon className="w-3.5 h-3.5" />
+                                Pinned Photos ({pinnedPhotos.length})
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setPinPickerOpen((p) => !p)}
+                                className="px-2 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/30 text-cyan-200 text-[11px] font-semibold cursor-pointer"
+                              >
+                                {pinPickerOpen ? 'Close Picker' : '+ Pin Photo'}
+                              </button>
+                            </div>
+
+                            {pinPickerOpen && (
+                              <div className="max-h-40 overflow-y-auto grid grid-cols-3 gap-1.5 p-1.5 rounded-lg bg-black/50 border border-white/10">
+                                {worldGalleryCandidates.slice(0, 18).map((g) => {
+                                  const isPinnedHere = g.location_entry_id === selectedLoc.id;
+                                  return (
+                                    <button
+                                      key={g.id}
+                                      type="button"
+                                      onClick={() =>
+                                        handlePinPhotoToLocation(
+                                          g.id,
+                                          isPinnedHere ? null : selectedLoc.id
+                                        )
+                                      }
+                                      className={`relative rounded-md overflow-hidden border cursor-pointer ${
+                                        isPinnedHere
+                                          ? 'border-amber-400 ring-2 ring-amber-400/50'
+                                          : 'border-white/15 hover:border-cyan-400'
+                                      }`}
+                                      title={isPinnedHere ? 'Click to unpin' : 'Click to pin to this location'}
+                                    >
+                                      <img
+                                        src={g.url}
+                                        alt={g.prompt}
+                                        loading="lazy"
+                                        className="w-full h-14 object-cover"
+                                      />
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {pinnedPhotos.length > 0 ? (
+                              <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto">
+                                {pinnedPhotos.map((p) => (
+                                  <div
+                                    key={p.id}
+                                    className="group relative rounded-lg overflow-hidden border border-white/15 bg-black"
+                                  >
+                                    <img
+                                      src={p.url}
+                                      alt={p.prompt}
+                                      loading="lazy"
+                                      className="w-full h-24 object-cover"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePinPhotoToLocation(p.id, null)}
+                                      className="opacity-0 group-hover:opacity-100 absolute top-1 right-1 p-1 rounded bg-black/80 text-rose-300 hover:text-rose-200 cursor-pointer transition"
+                                      title="Unpin photo from this location"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-[11px] text-slate-500">
+                                No photos pinned here yet. Generate scenes in this location or click "+ Pin Photo".
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-xs text-slate-400 py-6 text-center space-y-1">
+                            <MapPin className="w-5 h-5 text-cyan-400 mx-auto" />
+                            <p>Click any location pin on the map to view or pin photos.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-6 rounded-xl border border-dashed border-white/15 text-center text-xs text-slate-400">
+                      No world map generated yet. Click <strong>Generate World Map</strong> above to create the base map and place all {locationEntries.length} location{locationEntries.length === 1 ? '' : 's'} on it.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* World Global Settings */}
             <div className="bg-[#111520] p-4 rounded-2xl border border-white/10 grid grid-cols-1 md:grid-cols-2 gap-4">

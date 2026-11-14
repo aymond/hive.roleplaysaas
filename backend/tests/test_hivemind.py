@@ -727,6 +727,113 @@ def test_illustrate_chat_message_syncs_scene_state(monkeypatch) -> None:
         storage.chats.pop(sess.id, None)
 
 
+def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
+    import backend.main as main_mod
+    from backend.models import GalleryAsset, LoreEntry, Lorebook
+
+    world = Lorebook(
+        name="Test Realm",
+        description="A misty archipelago of floating spires.",
+        entries=[
+            LoreEntry(
+                id="loc-1",
+                title="Sky Harbor",
+                category="location",
+                keywords=["harbor", "sky"],
+                content="Airship docks suspended above the clouds.",
+            ),
+            LoreEntry(
+                id="npc-1",
+                title="Sky Guild",
+                category="faction",
+                keywords=["guild"],
+                content="Airship smugglers guild.",
+            ),
+        ],
+    )
+    photo = GalleryAsset(
+        id="asset-photo-1",
+        filename="harbor_scene.png",
+        url="/outputs/harbor_scene.png",
+        prompt="airship docks",
+        provider="comfyui",
+        world_id=world.id,
+    )
+    created_asset_ids: list[str] = [photo.id]
+
+    async def fake_generate_image_asset(**kwargs):
+        map_asset = GalleryAsset(
+            id="asset-map-1",
+            filename="test_map.png",
+            url="/outputs/test_map.png",
+            prompt=kwargs.get("prompt", ""),
+            provider="comfyui",
+            world_id=kwargs.get("world_id"),
+            width=kwargs.get("width", 1024),
+            height=kwargs.get("height", 768),
+        )
+        created_asset_ids.append(map_asset.id)
+        main_mod.storage.gallery.insert(0, map_asset)
+        return map_asset.model_dump()
+
+    monkeypatch.setattr(main_mod, "generate_image_asset", fake_generate_image_asset)
+    main_mod.storage.worlds[world.id] = world
+    main_mod.storage.gallery.insert(0, photo)
+
+    try:
+        client = TestClient(app)
+
+        # 1. Generate world map and auto-place initial location entry
+        resp = client.post(f"/api/worlds/{world.id}/generate-map")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["world"]["map_image_url"] == "/outputs/test_map.png"
+        entries_by_id = {e["id"]: e for e in data["world"]["entries"]}
+        assert entries_by_id["loc-1"]["map_x"] is not None
+        assert entries_by_id["loc-1"]["map_y"] is not None
+        assert entries_by_id["npc-1"]["map_x"] is None
+
+        # 2. Add a subsequent location via PUT /api/worlds/{id} without overwriting base map
+        updated_world = data["world"]
+        updated_world["entries"].append(
+            {
+                "id": "loc-2",
+                "title": "Sunken Archive",
+                "category": "location",
+                "keywords": ["archive"],
+                "content": "Flooded library beneath the spire.",
+            }
+        )
+        put_resp = client.put(f"/api/worlds/{world.id}", json=updated_world)
+        assert put_resp.status_code == 200
+        put_data = put_resp.json()
+        assert put_data["map_image_url"] == "/outputs/test_map.png"
+        put_entries = {e["id"]: e for e in put_data["entries"]}
+        assert put_entries["loc-2"]["map_x"] is not None
+        assert put_entries["loc-2"]["map_y"] is not None
+
+        # 3. Pin and unpin a gallery photo to a location
+        pin_resp = client.post(
+            f"/api/gallery/{photo.id}/pin-location",
+            json={"location_entry_id": "loc-2"},
+        )
+        assert pin_resp.status_code == 200
+        assert pin_resp.json()["asset"]["location_entry_id"] == "loc-2"
+
+        unpin_resp = client.post(
+            f"/api/gallery/{photo.id}/pin-location",
+            json={"location_entry_id": None},
+        )
+        assert unpin_resp.status_code == 200
+        assert unpin_resp.json()["asset"]["location_entry_id"] is None
+    finally:
+        main_mod.storage.worlds.pop(world.id, None)
+        main_mod.storage.gallery = [
+            a for a in main_mod.storage.gallery if a.id not in set(created_asset_ids)
+        ]
+
+
+
 
 
 

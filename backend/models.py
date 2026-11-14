@@ -53,6 +53,8 @@ class LoreEntry(BaseModel):
     content: str
     visual_description: str = ""
     image_url: str = ""
+    map_x: float | None = None
+    map_y: float | None = None
     constant: bool = False
     enabled: bool = True
     priority: int = 50
@@ -64,6 +66,8 @@ class Lorebook(BaseModel):
     subtitle: str = ""
     description: str = ""
     aesthetic_style: str = "cinematic concept art, intricate lighting, rich atmosphere, 8k"
+    map_image_url: str = ""
+    map_prompt: str = ""
     entries: list[LoreEntry] = Field(default_factory=list)
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
@@ -223,6 +227,7 @@ class GalleryAsset(BaseModel):
     seed: int = 42
     character_id: str | None = None
     world_id: str | None = None
+    location_entry_id: str | None = None
     workflow_id: str | None = None
     duration_ms: float | None = None
     created_at: str = Field(default_factory=utc_now_iso)
