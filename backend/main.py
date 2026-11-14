@@ -726,17 +726,39 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
     if not target_entry:
         raise HTTPException(status_code=404, detail="Lore entry not found")
 
+    _DEFAULT_VISUAL_DESC = "dramatic concept art, atmospheric lighting, detailed architecture"
+    custom_vis = (
+        target_entry.visual_description.strip()
+        if target_entry.visual_description
+        and target_entry.visual_description.strip().lower() != _DEFAULT_VISUAL_DESC
+        else ""
+    )
     prompt_parts = [
-        target_entry.visual_description or f"{target_entry.title}, {target_entry.content[:120]}",
+        target_entry.title.strip(),
+        target_entry.content.strip()[:220] if target_entry.content else "",
+        custom_vis,
         world.aesthetic_style,
-        f"{target_entry.category} concept art, masterpiece, 8k",
+        "architectural environment scene, wide angle, high detail"
+        if target_entry.category == "location"
+        else f"{target_entry.category} concept art, high detail",
     ]
     full_prompt = ", ".join(p for p in prompt_parts if p)
 
+    is_location = target_entry.category == "location"
     img_meta = await generate_image_asset(
         config=storage.config,
         output_dir=storage.generated_dir,
         prompt=full_prompt,
+        negative_prompt=(
+            "person, woman, man, people, portrait, close-up face, crowd, text, watermark, blurry, low quality, deformed"
+            if is_location
+            else "text, watermark, blurry, low quality, deformed"
+        ),
+        width=1024 if is_location else None,
+        height=768 if is_location else None,
+        render_mode_override="single_stylized",
+        face_detailer_override=False if is_location else None,
+        prefer_stylized_non_pony=is_location,
     )
     target_entry.image_url = img_meta["url"]
     world.updated_at = utc_now_iso()

@@ -857,6 +857,17 @@ def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
         assert "turquoise lagoon" in resort_prompt.lower()
         assert "photorealistic" not in resort_prompt.lower()
         assert "text labels" not in resort_prompt.lower()
+
+        # 5. Location entry artwork uses title + lore content even when visual_description has the default placeholder
+        entry_art_resp = client.post(f"/api/worlds/{world.id}/entries/loc-1/generate-image")
+        assert entry_art_resp.status_code == 200
+        entry_asset = entry_art_resp.json()["asset"]
+        assert "Sky Harbor" in entry_asset["prompt"]
+        assert "Airship docks suspended above the clouds." in entry_asset["prompt"]
+        assert "dramatic concept art, atmospheric lighting, detailed architecture" not in entry_asset["prompt"]
+        assert entry_asset["width"] == 1024
+        assert entry_asset["height"] == 768
+        assert entry_asset["location_entry_id"] == "loc-1"
     finally:
         main_mod.storage.worlds.pop(world.id, None)
         main_mod.storage.gallery = [
