@@ -7,7 +7,6 @@ import {
   Download,
   Trash2,
   MessageSquare,
-  Wand2,
   FileJson,
   Check,
 } from 'lucide-react';
@@ -20,7 +19,6 @@ interface CharacterForgeProps {
   worlds: Lorebook[];
   onCharactersUpdated: (chars: CharacterCard[]) => void;
   onStartChatWithChar: (charId: string) => void;
-  onOpenWorkflowWithChar: (charId: string, worldId?: string | null) => void;
   onGalleryUpdated: () => void;
 }
 
@@ -29,7 +27,6 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   worlds,
   onCharactersUpdated,
   onStartChatWithChar,
-  onOpenWorkflowWithChar,
   onGalleryUpdated,
 }) => {
   const [selectedId, setSelectedId] = useState<string>(characters[0]?.id || '');
@@ -230,15 +227,6 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
                   Roleplay Chat
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onOpenWorkflowWithChar(draft.id, draft.world_id)}
-                  className="px-3 py-1.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/30 text-violet-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Wand2 className="w-3.5 h-3.5" />
-                  Open in Comfy Node Graph
                 </button>
 
                 <a

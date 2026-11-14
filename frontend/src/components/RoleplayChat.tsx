@@ -39,7 +39,6 @@ interface RoleplayChatProps {
   onSelectChat: (id: string) => void;
   onChatsUpdated: (chats: ChatSession[], newActiveId?: string) => void;
   onGalleryUpdated: () => void;
-  onOpenWorkflowWithChar: (charId: string, worldId?: string | null) => void;
 }
 
 function renderFormattedRoleplayText(text: string) {
@@ -79,7 +78,6 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   onSelectChat,
   onChatsUpdated,
   onGalleryUpdated,
-  onOpenWorkflowWithChar,
 }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [autoIllustrate, setAutoIllustrate] = useState(false);
@@ -92,6 +90,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [updatingCheckpoint, setUpdatingCheckpoint] = useState(false);
   const [swipingMsgId, setSwipingMsgId] = useState<string | null>(null);
   const [lastProvider, setLastProvider] = useState<string>('Ollama / ComfyUI Hybrid');
+  const [newRoleplayOpen, setNewRoleplayOpen] = useState(false);
   const [newChatCharId, setNewChatCharId] = useState<string>(characters[0]?.id || '');
 
   // Right sidebar collapsible & tab: 'backstory_studio' | 'lore_inspector' | 'scene_state'
@@ -366,35 +365,52 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
 
   return (
     <div className="grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
-      {/* Left Column: Sessions & Quick Character Launcher */}
+      {/* Left Column: Sessions & Collapsible Character Launcher */}
       <aside className="col-span-3 lg:col-span-2 border-r border-white/10 bg-[#0d1017] flex flex-col h-full overflow-hidden">
-        <div className="p-3 border-b border-white/10 space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Start New Roleplay
-          </div>
-          <div className="flex gap-1.5">
-            <select
-              aria-label="Select character for new chat"
-              value={newChatCharId}
-              onChange={(e) => setNewChatCharId(e.target.value)}
-              className="flex-1 min-w-0 bg-[#151a26] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400"
-            >
-              {characters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => handleCreateNewChat(newChatCharId || characters[0]?.id)}
-              className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1 cursor-pointer shrink-0"
-              title="Create Roleplay Session"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New
-            </button>
-          </div>
+        <div className="p-2.5 border-b border-white/10 space-y-2">
+          <button
+            type="button"
+            onClick={() => setNewRoleplayOpen((prev) => !prev)}
+            className="w-full px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-400/30 text-xs font-semibold text-slate-200 flex items-center justify-between cursor-pointer transition"
+            title="Show or hide the New Roleplay session launcher"
+          >
+            <span className="flex items-center gap-1.5">
+              <Plus className="w-3.5 h-3.5 text-amber-400" />
+              New Roleplay
+            </span>
+            <ChevronRight
+              className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
+                newRoleplayOpen ? 'rotate-90' : ''
+              }`}
+            />
+          </button>
+          {newRoleplayOpen && (
+            <div className="flex gap-1.5 pt-0.5">
+              <select
+                aria-label="Select character for new chat"
+                value={newChatCharId}
+                onChange={(e) => setNewChatCharId(e.target.value)}
+                className="flex-1 min-w-0 bg-[#151a26] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-400"
+              >
+                {characters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  handleCreateNewChat(newChatCharId || characters[0]?.id);
+                  setNewRoleplayOpen(false);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1 cursor-pointer shrink-0"
+                title="Create a new roleplay chat session with the selected character"
+              >
+                Create
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
@@ -500,24 +516,16 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                       ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-400/30 text-emerald-200'
                       : 'bg-white/5 hover:bg-white/10 border-white/15 text-slate-300'
                   }`}
-                  title="Distilled backstory & situation checkpoint"
+                  title="View or edit the Situation Checkpoint — a condensed 3-5 sentence summary of older chat turns & backstory fed to the LLM for long-term memory (does not overwrite Scene State)."
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   Checkpoint
                 </button>
                 <button
                   type="button"
-                  onClick={() => onOpenWorkflowWithChar(activeCharacter.id, activeWorld?.id)}
-                  className="px-3 py-1.5 rounded-lg bg-violet-500/20 hover:bg-violet-500/30 border border-violet-400/30 text-violet-200 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition"
-                >
-                  <Wand2 className="w-3.5 h-3.5" />
-                  Open in Node Studio
-                </button>
-                <button
-                  type="button"
                   onClick={() => setRightPanelOpen((prev) => !prev)}
                   className="hidden lg:flex px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 text-xs font-medium items-center gap-1 cursor-pointer transition"
-                  title={rightPanelOpen ? 'Collapse Studio & State Panel' : 'Expand Studio & State Panel'}
+                  title={rightPanelOpen ? 'Collapse the Backstory Studio, Scene State & Lore Inspector sidebar' : 'Expand the Backstory Studio, Scene State & Lore Inspector sidebar'}
                 >
                   {rightPanelOpen ? (
                     <>
@@ -546,6 +554,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                       onClick={handleRefreshCheckpoint}
                       disabled={updatingCheckpoint}
                       className="px-2.5 py-1 rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 text-emerald-200 text-[11px] font-medium flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="Re-summarize older chat messages and character backstory into a fresh Situation Checkpoint using Ollama"
                     >
                       {updatingCheckpoint ? (
                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -559,6 +568,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                       onClick={handleSaveCheckpoint}
                       disabled={updatingCheckpoint}
                       className="px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 text-[11px] font-medium cursor-pointer disabled:opacity-50"
+                      title="Save your manual edits to the Situation Checkpoint used for future LLM replies"
                     >
                       Save
                     </button>
@@ -737,6 +747,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                                           handleIllustrateTurn(msg.id, draftPrompt.trim())
                                         }
                                         className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-[11px] cursor-pointer transition"
+                                        title="Render a new ComfyUI image using your manually edited SDXL prompt above"
                                       >
                                         Regenerate with Edited Prompt
                                       </button>
@@ -756,6 +767,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                           onClick={() => handleIllustrateTurn(msg.id)}
                           disabled={isIllustratingThis}
                           className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-amber-500/20 hover:text-amber-200 border border-white/10 flex items-center gap-1.5 text-[11px] cursor-pointer transition disabled:opacity-50"
+                          title="Generate (or regenerate) a ComfyUI image for this turn using the character card, tracked Scene State, and active turn (also syncs Scene State)"
                         >
                           <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
                           {isIllustratingThis
@@ -863,7 +875,10 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
               className="p-3 border-t border-white/10 bg-[#0d1017] space-y-2"
             >
               <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
+                <label
+                  className="flex items-center gap-2 cursor-pointer select-none"
+                  title="Automatically render a ComfyUI image after every character reply (adds ~20-40s per turn)"
+                >
                   <input
                     type="checkbox"
                     checked={autoIllustrate}
@@ -893,6 +908,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                   type="submit"
                   disabled={sending || !inputMessage.trim()}
                   className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-amber-500/30 disabled:text-amber-200 text-slate-950 font-semibold text-sm flex items-center gap-2 cursor-pointer transition shrink-0"
+                  title="Send your action or dialogue to the character and update tracked Scene State"
                 >
                   {sending ? (
                     <>
@@ -1285,6 +1301,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                   type="submit"
                   disabled={savingSceneState || !activeSession}
                   className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-[11px] cursor-pointer transition"
+                  title="Save your manual Scene State edits so future replies and image prompts use them"
                 >
                   {savingSceneState ? 'Saving...' : 'Save State'}
                 </button>

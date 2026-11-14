@@ -722,6 +722,19 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
     target_msg.swipes.append(new_reply)
     target_msg.active_swipe = len(target_msg.swipes) - 1
     target_msg.content = new_reply
+
+    prev_user_text = next(
+        (m.content for m in reversed(history_slice) if m.role == "user" and m.content.strip()),
+        "",
+    )
+    session.scene_state = await update_scene_state(
+        config=storage.config,
+        previous_state=session.scene_state,
+        user_text=prev_user_text,
+        assistant_text=new_reply,
+        world_aesthetic=world.aesthetic_style if world else "",
+    )
+
     session.updated_at = utc_now_iso()
     storage.save()
     return {"session": session.model_dump(), "provider": provider_used}
@@ -775,6 +788,25 @@ async def illustrate_chat_message(
     )
 
     t0 = time.perf_counter()
+    # Sync SceneState with the turn being illustrated so the Scene State panel matches the picture
+    turn_user_text = custom_prompt or ""
+    turn_assistant_text = target_msg.content if target_msg.role == "assistant" else ""
+    if not turn_user_text:
+        if target_msg.role == "user":
+            turn_user_text = target_msg.content
+        else:
+            for m in reversed(session.messages[:msg_idx]):
+                if m.role == "user" and m.content.strip():
+                    turn_user_text = m.content
+                    break
+    session.scene_state = await update_scene_state(
+        config=storage.config,
+        previous_state=session.scene_state,
+        user_text=turn_user_text,
+        assistant_text=turn_assistant_text,
+        world_aesthetic=world.aesthetic_style if world else "",
+    )
+
     if custom_prompt:
         full_prompt = custom_prompt
     else:

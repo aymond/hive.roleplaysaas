@@ -3,7 +3,6 @@ import {
   MessageSquare,
   Users,
   BookOpen,
-  GitBranch,
   Image as ImageIcon,
   Settings,
   Cpu,
@@ -16,16 +15,14 @@ import type {
   GalleryAsset,
   Lorebook,
   SystemStatus,
-  WorkflowGraph,
 } from './types';
 import { RoleplayChat } from './components/RoleplayChat';
 import { CharacterForge } from './components/CharacterForge';
 import { WorldCodex } from './components/WorldCodex';
-import { NodeStudio } from './components/NodeStudio';
 import { AssetGallery } from './components/AssetGallery';
 import { EngineSettingsModal } from './components/EngineSettingsModal';
 
-type StudioTab = 'chat' | 'characters' | 'worlds' | 'nodes' | 'gallery';
+type StudioTab = 'chat' | 'characters' | 'worlds' | 'gallery';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<StudioTab>('chat');
@@ -34,19 +31,17 @@ export const App: React.FC = () => {
   const [worlds, setWorlds] = useState<Lorebook[]>([]);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string>('');
-  const [workflows, setWorkflows] = useState<WorkflowGraph[]>([]);
   const [gallery, setGallery] = useState<GalleryAsset[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
     try {
-      const [sys, chars, wlds, chts, wfs, gal] = await Promise.all([
+      const [sys, chars, wlds, chts, gal] = await Promise.all([
         api.getSystemStatus(),
         api.listCharacters(),
         api.listWorlds(),
         api.listChats(),
-        api.listWorkflows(),
         api.listGallery(),
       ]);
       setStatus(sys);
@@ -56,7 +51,6 @@ export const App: React.FC = () => {
       if (chts.length > 0 && !activeChatId) {
         setActiveChatId(chts[0].id);
       }
-      setWorkflows(wfs);
       setGallery(gal);
     } finally {
       setLoading(false);
@@ -95,27 +89,6 @@ export const App: React.FC = () => {
     setActiveTab('chat');
   };
 
-  const handleOpenWorkflowWithChar = (charId: string, worldId?: string | null) => {
-    setWorkflows((prev) =>
-      prev.map((wf, idx) => {
-        if (idx !== 0) return wf;
-        return {
-          ...wf,
-          nodes: wf.nodes.map((n) => {
-            if (n.type === 'character_source') {
-              return { ...n, data: { ...n.data, character_id: charId } };
-            }
-            if (n.type === 'lore_injector' && worldId) {
-              return { ...n, data: { ...n.data, world_id: worldId } };
-            }
-            return n;
-          }),
-        };
-      })
-    );
-    setActiveTab('nodes');
-  };
-
   const navItems: { id: StudioTab; label: string; badge?: number; icon: React.ReactNode }[] = [
     {
       id: 'chat',
@@ -134,12 +107,6 @@ export const App: React.FC = () => {
       label: 'World Codex',
       badge: worlds.length,
       icon: <BookOpen className="w-4 h-4" />,
-    },
-    {
-      id: 'nodes',
-      label: 'Comfy Node Studio',
-      badge: workflows.length,
-      icon: <GitBranch className="w-4 h-4" />,
     },
     {
       id: 'gallery',
@@ -243,7 +210,6 @@ export const App: React.FC = () => {
                   if (newId !== undefined) setActiveChatId(newId);
                 }}
                 onGalleryUpdated={refreshGallery}
-                onOpenWorkflowWithChar={handleOpenWorkflowWithChar}
               />
             )}
 
@@ -253,7 +219,6 @@ export const App: React.FC = () => {
                 worlds={worlds}
                 onCharactersUpdated={setCharacters}
                 onStartChatWithChar={handleStartChatWithChar}
-                onOpenWorkflowWithChar={handleOpenWorkflowWithChar}
                 onGalleryUpdated={refreshGallery}
               />
             )}
@@ -262,17 +227,6 @@ export const App: React.FC = () => {
               <WorldCodex
                 worlds={worlds}
                 onWorldsUpdated={setWorlds}
-                onGalleryUpdated={refreshGallery}
-              />
-            )}
-
-            {activeTab === 'nodes' && (
-              <NodeStudio
-                workflows={workflows}
-                characters={characters}
-                worlds={worlds}
-                onWorkflowsUpdated={setWorkflows}
-                onCharactersUpdated={setCharacters}
                 onGalleryUpdated={refreshGallery}
               />
             )}

@@ -1421,7 +1421,10 @@ def _parse_scene_state_json(
             if key in pinned and prev_val:
                 cues = _SCENE_FIELD_CHANGE_CUES.get(key, ())
                 has_explicit_change = any(cue in turn_l for cue in cues)
-                if not has_explicit_change or not new_val:
+                is_stale_prose_pose = key == "pose_and_action" and (
+                    getattr(fallback, "pose_and_action", "").lstrip().startswith("*")
+                )
+                if (not has_explicit_change and not is_stale_prose_pose) or not new_val:
                     new_val = prev_val
             resolved[key] = new_val
 

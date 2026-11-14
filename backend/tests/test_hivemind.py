@@ -676,6 +676,57 @@ def test_semantic_dedup_and_preamble_cleanup() -> None:
     assert "intimate kiss" in joined
 
 
+def test_illustrate_chat_message_syncs_scene_state(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+    from backend.main import app, storage
+    from backend.models import ChatMessage, ChatSession, SceneState
+
+    async def fake_generate_image_asset(**kwargs):
+        return {
+            "url": "/media/generated/test_sync.png",
+            "provider": "mock_comfyui",
+            "width": 512,
+            "height": 768,
+            "seed": 42,
+            "duration_ms": 120.0,
+        }
+
+    async def fake_harmonize(**kwargs):
+        return "standing in front, ready to kiss", "mock"
+
+    async def offline_ollama(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("backend.main.generate_image_asset", fake_generate_image_asset)
+    monkeypatch.setattr("backend.inference.llm_engine.harmonize_sdxl_prompt", fake_harmonize)
+    monkeypatch.setattr("backend.inference.llm_engine._call_ollama_chat", offline_ollama)
+
+    char_id = next(iter(storage.characters.keys()))
+    sess = ChatSession(
+        title="Sync Test",
+        character_id=char_id,
+        scene_state=SceneState(
+            location="Villa garden",
+            attire="sleek black jumpsuit",
+            pose_and_action="*Liamching moved with grace",
+            pinned_fields=["pose_and_action", "location"],
+        ),
+        messages=[
+            ChatMessage(role="user", sender_name="Traveler", content="Stand in front of me, naked, ready to kiss"),
+            ChatMessage(role="assistant", sender_name="Liamching", content="*The suit fell away completely.*"),
+        ],
+    )
+    storage.chats[sess.id] = sess
+    try:
+        client = TestClient(app)
+        resp = client.post(f"/api/chats/{sess.id}/messages/{sess.messages[-1].id}/illustrate")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session"]["scene_state"]["attire"] == "completely nude"
+    finally:
+        storage.chats.pop(sess.id, None)
+
+
 
 
 
