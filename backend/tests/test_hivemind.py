@@ -868,6 +868,27 @@ def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
         assert entry_asset["width"] == 1024
         assert entry_asset["height"] == 768
         assert entry_asset["location_entry_id"] == "loc-1"
+
+        # 6. Landscape checkpoint selector prefers Juggernaut-XL / RealVisXL over DreamShaper Turbo and Pony
+        from backend.inference.image_engine import _select_landscape_checkpoint
+
+        installed = [
+            "CyberRealisticPony_V18.0_F16.safetensors",
+            "DreamShaperXL_Turbo_v2_1.safetensors",
+            "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+            "sd_xl_base_1.0_0.9vae.safetensors",
+        ]
+        assert (
+            _select_landscape_checkpoint(InferenceConfig(), installed)
+            == "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
+        )
+        assert (
+            _select_landscape_checkpoint(
+                InferenceConfig(comfyui_landscape_checkpoint="missing.safetensors"),
+                installed + ["RealVisXL_V5.0.safetensors"],
+            )
+            == "RealVisXL_V5.0.safetensors"
+        )
     finally:
         main_mod.storage.worlds.pop(world.id, None)
         main_mod.storage.gallery = [

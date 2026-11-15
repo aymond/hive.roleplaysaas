@@ -651,9 +651,11 @@ async def generate_world_map(
         ),
         width=1024,
         height=768,
+        steps=22,
+        cfg=5.5,
         render_mode_override="single_stylized",
         face_detailer_override=False,
-        prefer_stylized_non_pony=True,
+        landscape_mode=True,
     )
     world.map_image_url = img_meta["url"]
     world.map_prompt = map_prompt
@@ -756,9 +758,11 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
         ),
         width=1024 if is_location else None,
         height=768 if is_location else None,
+        steps=22 if is_location else None,
+        cfg=5.5 if is_location else None,
         render_mode_override="single_stylized",
         face_detailer_override=False if is_location else None,
-        prefer_stylized_non_pony=is_location,
+        landscape_mode=is_location,
     )
     target_entry.image_url = img_meta["url"]
     world.updated_at = utc_now_iso()

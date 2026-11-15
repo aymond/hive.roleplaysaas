@@ -186,6 +186,7 @@ export interface InferenceConfig {
   comfyui_checkpoint: string;
   comfyui_render_mode?: 'hybrid_refiner' | 'single_stylized' | 'single_raw' | 'action_hybrid';
   comfyui_refiner_checkpoint?: string;
+  comfyui_landscape_checkpoint?: string;
   comfyui_refiner_switch?: number;
   comfyui_face_detailer_enabled?: boolean;
   comfyui_face_detailer_model?: string;

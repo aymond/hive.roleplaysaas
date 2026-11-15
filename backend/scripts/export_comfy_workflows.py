@@ -610,7 +610,7 @@ def build_world_map() -> dict[str, Any]:
         (330, 98),
         [],
         [("MODEL", "MODEL"), ("CLIP", "CLIP"), ("VAE", "VAE")],
-        ["DreamShaperXL_Turbo_v2_1.safetensors"],
+        ["Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"],
     )
     clip_skip = b.add_node(
         "CLIPSetLastLayer",
@@ -667,7 +667,7 @@ def build_world_map() -> dict[str, Any]:
         (315, 262),
         [("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
         [("LATENT", "LATENT")],
-        [4200, "randomize", 8, 2.2, "dpmpp_sde", "karras", 1.0],
+        [4200, "randomize", 22, 5.5, "dpmpp_2m", "karras", 1.0],
     )
     b.connect(ckpt, 0, sampler, 0)
     b.connect(pos, 0, sampler, 1)
@@ -705,7 +705,7 @@ def build_location_scene() -> dict[str, Any]:
         (330, 98),
         [],
         [("MODEL", "MODEL"), ("CLIP", "CLIP"), ("VAE", "VAE")],
-        ["DreamShaperXL_Turbo_v2_1.safetensors"],
+        ["Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"],
     )
     clip_skip = b.add_node(
         "CLIPSetLastLayer",
@@ -755,7 +755,7 @@ def build_location_scene() -> dict[str, Any]:
         (315, 262),
         [("model", "MODEL"), ("positive", "CONDITIONING"), ("negative", "CONDITIONING"), ("latent_image", "LATENT")],
         [("LATENT", "LATENT")],
-        [4200, "randomize", 8, 2.2, "dpmpp_sde", "karras", 1.0],
+        [4200, "randomize", 22, 5.5, "dpmpp_2m", "karras", 1.0],
     )
     b.connect(ckpt, 0, sampler, 0)
     b.connect(pos, 0, sampler, 1)

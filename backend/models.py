@@ -203,6 +203,7 @@ class InferenceConfig(BaseModel):
         "action_hybrid",
     ] = "action_hybrid"
     comfyui_refiner_checkpoint: str = "sd_xl_base_1.0_0.9vae.safetensors"
+    comfyui_landscape_checkpoint: str = "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
     comfyui_refiner_switch: float = 0.65
     comfyui_face_detailer_enabled: bool = True
     comfyui_face_detailer_model: str = "same"

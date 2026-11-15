@@ -455,6 +455,26 @@ async def _fetch_comfy_node_image_bytes(
     return None, ""
 
 
+def _select_landscape_checkpoint(config: InferenceConfig, available_ckpts: list[str]) -> str | None:
+    """Select the best available checkpoint for landscapes, maps, and architectural scenery."""
+    if not available_ckpts:
+        return None
+    configured = (getattr(config, "comfyui_landscape_checkpoint", "") or "").strip()
+    if configured:
+        if configured in available_ckpts:
+            return configured
+        matched = next((c for c in available_ckpts if configured.lower() in c.lower()), None)
+        if matched:
+            return matched
+    return (
+        next((c for c in available_ckpts if "realvis" in c.lower() or "realarchvis" in c.lower()), None)
+        or next((c for c in available_ckpts if "juggernaut" in c.lower()), None)
+        or next((c for c in available_ckpts if "dreamshaper" in c.lower()), None)
+        or next((c for c in available_ckpts if "sd_xl_base" in c.lower()), None)
+        or next((c for c in available_ckpts if "pony" not in c.lower()), None)
+    )
+
+
 async def _run_comfyui_bridge(
     config: InferenceConfig,
     prompt: str,
@@ -467,6 +487,7 @@ async def _run_comfyui_bridge(
     render_mode_override: str | None = None,
     face_detailer_override: bool | None = None,
     prefer_stylized_non_pony: bool = False,
+    landscape_mode: bool = False,
 ) -> tuple[bytes | None, str]:
     status = await check_comfyui_status(config.comfyui_base_url)
     if not status["online"]:
@@ -477,14 +498,10 @@ async def _run_comfyui_bridge(
     available_ckpts: list[str] = status.get("checkpoints", [])
     face_detectors: list[str] = status.get("face_detectors", [])
     ckpt_to_use = config.comfyui_checkpoint
-    if prefer_stylized_non_pony and available_ckpts:
-        non_pony = (
-            next((c for c in available_ckpts if "dreamshaper" in c.lower()), None)
-            or next((c for c in available_ckpts if "sd_xl_base" in c.lower()), None)
-            or next((c for c in available_ckpts if "pony" not in c.lower()), None)
-        )
-        if non_pony:
-            ckpt_to_use = non_pony
+    if (landscape_mode or prefer_stylized_non_pony) and available_ckpts:
+        landscape_ckpt = _select_landscape_checkpoint(config, available_ckpts)
+        if landscape_ckpt:
+            ckpt_to_use = landscape_ckpt
     elif available_ckpts and ckpt_to_use not in available_ckpts:
         matched = next(
             (c for c in available_ckpts if ckpt_to_use.lower() in c.lower() or "sd_xl_base" in c.lower()),
@@ -889,6 +906,7 @@ async def generate_image_asset(
     render_mode_override: str | None = None,
     face_detailer_override: bool | None = None,
     prefer_stylized_non_pony: bool = False,
+    landscape_mode: bool = False,
 ) -> dict[str, Any]:
     """
     Generates an image using the configured Apple Silicon Image Engine, writes it to output_dir,
@@ -928,6 +946,7 @@ async def generate_image_asset(
             render_mode_override=render_mode_override,
             face_detailer_override=face_detailer_override,
             prefer_stylized_non_pony=prefer_stylized_non_pony,
+            landscape_mode=landscape_mode,
         )
         if img_bytes:
             provider_used = comfy_label or f"comfyui ({config.comfyui_checkpoint})"
