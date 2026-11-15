@@ -77,10 +77,18 @@ def build_tavern_system_prompt(
     state_summary = format_scene_state_summary(scene_state)
     if state_summary:
         parts.append(f"### Current Visual & Physical State (Stay Consistent):\n{state_summary}")
-    if character.mes_example:
+    if character.mes_example and "before the fracture" not in character.mes_example.lower():
         parts.append(f"### Example Dialogue:\n{replace_tavern_macros(character.mes_example, character.name, user_name)}")
     if character.post_history_instructions:
         parts.append(replace_tavern_macros(character.post_history_instructions, character.name, user_name))
+
+    parts.append(
+        f"### Roleplay Rules (Strict):\n"
+        f"- Stay strictly in consistent third-person limited perspective focused on {character.name}; "
+        f"do NOT switch to first-person \"I\" for {user_name} and do NOT write {user_name}'s dialogue, thoughts, or actions.\n"
+        f"- Keep your reply grounded, coherent, and concise (1 to 3 paragraphs, ~80-180 words). "
+        f"Stop cleanly at the end of the beat—never emit unpunctuated word lists or trailing repetition."
+    )
 
     return "\n\n".join(parts)
 
@@ -90,9 +98,10 @@ async def _call_ollama_chat(
     messages: list[dict[str, str]],
     purpose: str = "chat",
     temperature_override: float | None = None,
-    repeat_penalty: float = 1.18,
+    repeat_penalty: float = 1.07,
     seed: int | None = None,
     model_override: str | None = None,
+    num_predict_override: int | None = None,
 ) -> str | None:
     status = await check_ollama_status(config.ollama_base_url)
     if not status["online"] or not status["models"]:
@@ -129,11 +138,11 @@ async def _call_ollama_chat(
             "keep_alive": "15m",
             "options": {
                 "temperature": temp,
-                "num_predict": config.max_tokens,
+                "num_predict": num_predict_override if num_predict_override is not None else config.max_tokens,
                 "repeat_penalty": repeat_penalty,
-                "repeat_last_n": 256,
+                "repeat_last_n": 64,
                 "top_p": 0.92,
-                "min_p": 0.05,
+                "min_p": 0.08,
                 "seed": call_seed,
             },
         }
@@ -273,14 +282,16 @@ async def generate_roleplay_reply(
     prev_assistant_msg = next((m.content for m in reversed(history) if m.role == "assistant"), "")
 
     if config.llm_provider in ("auto", "ollama"):
-        temp_ov = min(1.0, config.temperature + 0.15) if variation_index > 0 else None
-        rep_pen = 1.22 if variation_index > 0 else 1.18
+        temp_ov = min(1.0, config.temperature + 0.12) if variation_index > 0 else None
+        rep_pen = 1.10 if variation_index > 0 else 1.07
+        roleplay_max_tokens = min(int(config.max_tokens or 280), 280)
         res = await _call_ollama_chat(
             config,
             messages,
             purpose=f"roleplay_reply({character.name})",
             temperature_override=temp_ov,
             repeat_penalty=rep_pen,
+            num_predict_override=roleplay_max_tokens,
         )
         if res and prev_assistant_msg:
             sim = difflib.SequenceMatcher(None, prev_assistant_msg.strip(), res.strip()).ratio()
@@ -305,8 +316,9 @@ async def generate_roleplay_reply(
                     config,
                     retry_messages,
                     purpose=f"roleplay_reply_retry({character.name})",
-                    temperature_override=min(1.05, config.temperature + 0.22),
-                    repeat_penalty=1.28,
+                    temperature_override=min(1.0, config.temperature + 0.18),
+                    repeat_penalty=1.14,
+                    num_predict_override=roleplay_max_tokens,
                 )
                 if retry_res:
                     res = retry_res
@@ -379,11 +391,11 @@ async def stream_roleplay_reply(
                             "keep_alive": "15m",
                             "options": {
                                 "temperature": config.temperature,
-                                "num_predict": config.max_tokens,
-                                "repeat_penalty": 1.18,
-                                "repeat_last_n": 256,
+                                "num_predict": min(int(config.max_tokens or 280), 280),
+                                "repeat_penalty": 1.07,
+                                "repeat_last_n": 64,
                                 "top_p": 0.92,
-                                "min_p": 0.05,
+                                "min_p": 0.08,
                                 "seed": call_seed,
                             },
                         },

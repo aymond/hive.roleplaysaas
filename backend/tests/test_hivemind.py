@@ -1039,6 +1039,18 @@ def test_prompt_templates_across_pipelines() -> None:
     assert "glowing lanterns" in prompt_with_lore
 
 
+def test_tavern_system_prompt_guardrails_and_placeholder_filter() -> None:
+    card = CharacterCard(
+        name="Liamching",
+        mes_example='<START>\n{{user}}: Who are you?\n{{char}}: "Someone who remembers how the sky looked before the fracture."',
+    )
+    sys_prompt = build_tavern_system_prompt(card, lore_context="", user_name="Traveler")
+    assert "Roleplay Rules (Strict)" in sys_prompt
+    assert "do NOT write Traveler's dialogue, thoughts, or actions" in sys_prompt
+    assert "1 to 3 paragraphs" in sys_prompt
+    assert "before the fracture" not in sys_prompt
+
+
 
 
 
