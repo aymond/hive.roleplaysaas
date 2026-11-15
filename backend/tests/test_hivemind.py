@@ -896,6 +896,93 @@ def test_world_codex_map_generation_and_photo_pinning(monkeypatch) -> None:
         ]
 
 
+def test_image_metadata_sidecar_and_reuse_prompt_new_seed(tmp_path: Path, monkeypatch) -> None:
+    import json
+    import backend.main as main_mod
+    from backend.inference.image_engine import generate_image_asset
+    from backend.models import ChatSession
+
+    # 1. Verify generate_image_asset writes a companion .json metadata file with seed
+    cfg = InferenceConfig(image_provider="procedural_art")
+    meta = asyncio.run(
+        generate_image_asset(
+            config=cfg,
+            output_dir=tmp_path,
+            prompt="sunlit beachside resort cabana",
+            negative_prompt="blurry",
+            width=512,
+            height=512,
+            seed=777123,
+        )
+    )
+    png_path = tmp_path / meta["filename"]
+    json_path = png_path.with_suffix(".json")
+    assert png_path.exists()
+    assert json_path.exists()
+    assert meta["metadata_url"] == f"/media/generated/{json_path.name}"
+    saved_meta = json.loads(json_path.read_text(encoding="utf-8"))
+    assert saved_meta["seed"] == 777123
+    assert saved_meta["prompt"] == "sunlit beachside resort cabana"
+    assert saved_meta["filename"] == meta["filename"]
+
+    # 2. Verify reuse_prompt=True keeps exact prompt, skips scene state mutation, and saves seed + metadata_url
+    async def fake_generate_image_asset(**kwargs):
+        return {
+            "filename": "hm_seed999.png",
+            "url": "/media/generated/hm_seed999.png",
+            "metadata_url": "/media/generated/hm_seed999.json",
+            "prompt": kwargs.get("prompt", ""),
+            "negative_prompt": kwargs.get("negative_prompt", ""),
+            "width": 768,
+            "height": 1024,
+            "steps": 20,
+            "cfg": 6.0,
+            "seed": 999888,
+            "provider": "comfyui",
+            "duration_ms": 120.0,
+        }
+
+    monkeypatch.setattr(main_mod, "generate_image_asset", fake_generate_image_asset)
+
+    original_prompt = "exact locked scene prompt, sunlit balcony, linen dress"
+    sess = ChatSession(
+        title="Seed Reuse Test",
+        character_id="char_lyra",
+        scene_state=SceneState(location="Balcony", attire="linen dress"),
+        messages=[
+            ChatMessage(
+                role="assistant",
+                sender_name="Lyra",
+                content="She smiles from the balcony.",
+                image_url="/media/generated/hm_old.png",
+                image_prompt=original_prompt,
+                image_seed=111222,
+            )
+        ],
+    )
+    main_mod.storage.chats[sess.id] = sess
+    before_gallery_len = len(main_mod.storage.gallery)
+    try:
+        client = TestClient(app)
+        resp = client.post(
+            f"/api/chats/{sess.id}/messages/{sess.messages[0].id}/illustrate",
+            json={"reuse_prompt": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        updated_msg = data["session"]["messages"][0]
+        assert updated_msg["image_prompt"] == original_prompt
+        assert updated_msg["image_seed"] == 999888
+        assert updated_msg["image_metadata_url"] == "/media/generated/hm_seed999.json"
+        assert data["asset"]["seed"] == 999888
+        assert data["asset"]["metadata_url"] == "/media/generated/hm_seed999.json"
+        assert data["session"]["scene_state"]["attire"] == "linen dress"
+    finally:
+        main_mod.storage.chats.pop(sess.id, None)
+        if len(main_mod.storage.gallery) > before_gallery_len:
+            main_mod.storage.gallery.pop(0)
+
+
 
 
 

@@ -198,12 +198,23 @@ export const api = {
         body: JSON.stringify({ direction }),
       }
     ),
-  illustrateMessage: (chatId: string, msgId: string, customPrompt?: string) =>
+  illustrateMessage: (
+    chatId: string,
+    msgId: string,
+    customPrompt?: string,
+    reusePrompt?: boolean
+  ) =>
     request<{ session: ChatSession; asset: GalleryAsset }>(
       `/api/chats/${chatId}/messages/${msgId}/illustrate`,
       {
         method: 'POST',
-        body: customPrompt ? JSON.stringify({ custom_prompt: customPrompt }) : undefined,
+        body:
+          customPrompt || reusePrompt
+            ? JSON.stringify({
+                ...(customPrompt ? { custom_prompt: customPrompt } : {}),
+                ...(reusePrompt ? { reuse_prompt: true } : {}),
+              })
+            : undefined,
       }
     ),
   updateChatCheckpoint: (

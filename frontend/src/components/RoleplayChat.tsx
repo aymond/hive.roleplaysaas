@@ -18,6 +18,7 @@ import {
   Pin,
   PinOff,
   RefreshCw,
+  Dices,
 } from 'lucide-react';
 import { api } from '../api';
 import type {
@@ -253,11 +254,20 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     }
   };
 
-  const handleIllustrateTurn = async (msgId: string, customPrompt?: string) => {
+  const handleIllustrateTurn = async (
+    msgId: string,
+    customPrompt?: string,
+    reusePrompt?: boolean
+  ) => {
     if (!activeSession || illustratingMsgId) return;
     setIllustratingMsgId(msgId);
     try {
-      const res = await api.illustrateMessage(activeSession.id, msgId, customPrompt);
+      const res = await api.illustrateMessage(
+        activeSession.id,
+        msgId,
+        customPrompt,
+        reusePrompt
+      );
       const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
       onChatsUpdated(nextChats);
       if (customPrompt) {
@@ -713,13 +723,32 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                                 editedScenePrompts[msg.id] !== msg.image_prompt;
                               return (
                                 <details className="bg-[#0b0e16] border-t border-white/10 text-[11px] text-slate-300">
-                                  <summary className="px-3 py-2 cursor-pointer select-none flex items-center justify-between text-amber-300 font-semibold hover:bg-white/5 transition">
+                                  <summary className="px-3 py-2 cursor-pointer select-none flex items-center justify-between gap-2 text-amber-300 font-semibold hover:bg-white/5 transition">
                                     <span>View / Edit Scene Prompt</span>
-                                    {isDirty && (
-                                      <span className="text-[10px] text-cyan-300 font-normal">
-                                        (Edited — ready to resubmit)
-                                      </span>
-                                    )}
+                                    <span className="flex items-center gap-2 font-normal">
+                                      {msg.image_seed != null && (
+                                        <span className="text-[10px] font-mono text-slate-400">
+                                          Seed #{msg.image_seed}
+                                        </span>
+                                      )}
+                                      {msg.image_metadata_url && (
+                                        <a
+                                          href={msg.image_metadata_url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="text-[10px] text-emerald-300 hover:underline"
+                                          title="Open saved image metadata JSON (including seed, prompt, steps, CFG)"
+                                        >
+                                          Metadata JSON
+                                        </a>
+                                      )}
+                                      {isDirty && (
+                                        <span className="text-[10px] text-cyan-300">
+                                          (Edited — ready to resubmit)
+                                        </span>
+                                      )}
+                                    </span>
                                   </summary>
                                   <div className="px-3 pb-3 pt-1 space-y-2 border-t border-white/5">
                                     <textarea
@@ -787,6 +816,18 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                               ? 'Re-Illustrate Scene'
                               : 'Illustrate Scene'}
                           </button>
+                          {msg.image_url && msg.image_prompt && (
+                            <button
+                              type="button"
+                              onClick={() => handleIllustrateTurn(msg.id, undefined, true)}
+                              disabled={isIllustratingThis}
+                              className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-cyan-500/20 hover:text-cyan-200 border border-white/10 flex items-center gap-1.5 text-[11px] cursor-pointer transition disabled:opacity-50"
+                              title="Keep the exact same prompt and render a fresh variation with a new random seed"
+                            >
+                              <Dices className="w-3.5 h-3.5 text-cyan-400" />
+                              New Seed
+                            </button>
+                          )}
                           {msg.timings && (msg.timings.reply_ms || msg.timings.render_ms) && (
                             <span
                               className="text-[10px] font-mono text-slate-500"

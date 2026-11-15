@@ -91,6 +91,8 @@ class ChatMessage(BaseModel):
     active_swipe: int = 0
     image_url: str | None = None
     image_prompt: str | None = None
+    image_seed: int | None = None
+    image_metadata_url: str | None = None
     triggered_lore: list[TriggeredLoreInfo] = Field(default_factory=list)
     timings: dict[str, Any] | None = None
     created_at: str = Field(default_factory=utc_now_iso)
@@ -226,6 +228,7 @@ class GalleryAsset(BaseModel):
     width: int = 512
     height: int = 512
     seed: int = 42
+    metadata_url: str | None = None
     character_id: str | None = None
     world_id: str | None = None
     location_entry_id: str | None = None

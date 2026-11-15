@@ -76,6 +76,8 @@ export interface ChatMessage {
   active_swipe: number;
   image_url: string | null;
   image_prompt: string | null;
+  image_seed?: number | null;
+  image_metadata_url?: string | null;
   triggered_lore: TriggeredLoreInfo[];
   timings?: {
     reply_ms?: number;
@@ -235,6 +237,7 @@ export interface GalleryAsset {
   width: number;
   height: number;
   seed: number;
+  metadata_url?: string | null;
   character_id?: string | null;
   world_id?: string | null;
   location_entry_id?: string | null;

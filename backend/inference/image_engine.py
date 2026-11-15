@@ -8,6 +8,7 @@ import math
 import platform
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1001,17 +1002,42 @@ async def generate_image_asset(
         pass
 
     elapsed = time.perf_counter() - t_start
+    duration_ms = round(elapsed * 1000, 1)
+    meta_filename = file_path.with_suffix(".json").name
+    metadata_url = f"/media/generated/{meta_filename}"
+    metadata_payload = {
+        "filename": filename,
+        "url": f"/media/generated/{filename}",
+        "metadata_url": metadata_url,
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "seed": actual_seed,
+        "width": w,
+        "height": h,
+        "steps": st,
+        "cfg": guidance,
+        "provider": provider_used,
+        "sampler": getattr(config, "comfyui_sampler", "dpmpp_2m"),
+        "scheduler": getattr(config, "comfyui_scheduler", "karras"),
+        "render_mode": render_mode_override or getattr(config, "comfyui_render_mode", "single_stylized"),
+        "duration_ms": duration_ms,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    file_path.with_suffix(".json").write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
+
     logger.info(
-        "⏱️ IMAGE←   | provider=%s | %dx%d | total=%.2fs",
+        "⏱️ IMAGE←   | provider=%s | %dx%d | seed=%d | total=%.2fs",
         provider_used,
         w,
         h,
+        actual_seed,
         elapsed,
     )
 
     return {
         "filename": filename,
         "url": f"/media/generated/{filename}",
+        "metadata_url": metadata_url,
         "prompt": prompt,
         "negative_prompt": negative_prompt,
         "width": w,
@@ -1020,5 +1046,5 @@ async def generate_image_asset(
         "cfg": guidance,
         "seed": actual_seed,
         "provider": provider_used,
-        "duration_ms": round(elapsed * 1000, 1),
+        "duration_ms": duration_ms,
     }

@@ -92,6 +92,7 @@ class SwipeMessageRequest(BaseModel):
 
 class IllustrateMessageRequest(BaseModel):
     custom_prompt: str | None = None
+    reuse_prompt: bool = False
 
 
 class CheckpointRequest(BaseModel):
@@ -956,6 +957,8 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         }
         assistant_msg.image_url = img_meta["url"]
         assistant_msg.image_prompt = image_prompt
+        assistant_msg.image_seed = img_meta["seed"]
+        assistant_msg.image_metadata_url = img_meta.get("metadata_url")
         storage.gallery.insert(
             0,
             GalleryAsset(
@@ -966,6 +969,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
                 width=img_meta["width"],
                 height=img_meta["height"],
                 seed=img_meta["seed"],
+                metadata_url=img_meta.get("metadata_url"),
                 character_id=card.id,
                 world_id=session.world_id,
             ),
@@ -1195,12 +1199,15 @@ async def illustrate_chat_message(
     world = storage.worlds.get(session.world_id) if session.world_id else None
 
     custom_prompt = req.custom_prompt.strip() if (req and req.custom_prompt and req.custom_prompt.strip()) else None
+    reuse_prompt = bool(req and req.reuse_prompt and target_msg.image_prompt and target_msg.image_prompt.strip())
+    locked_prompt = custom_prompt or (target_msg.image_prompt.strip() if reuse_prompt and target_msg.image_prompt else None)
     logger.info(
-        "▶ ACTION   | illustrate_chat_message(chat=%r, char=%r, msg_id=%s, custom_prompt=%s)",
+        "▶ ACTION   | illustrate_chat_message(chat=%r, char=%r, msg_id=%s, custom_prompt=%s, reuse_prompt=%s)",
         session.title,
         card.name if card else "None",
         msg_id,
         "YES" if custom_prompt else "NO",
+        "YES" if reuse_prompt else "NO",
     )
 
     # Scan surrounding chat turns + character scenario against Lorebook
@@ -1225,10 +1232,12 @@ async def illustrate_chat_message(
     )
 
     t0 = time.perf_counter()
-    # Sync SceneState with the turn being illustrated so the Scene State panel matches the picture
-    turn_user_text = custom_prompt or ""
-    turn_assistant_text = target_msg.content if target_msg.role == "assistant" else ""
-    if not turn_user_text:
+    if locked_prompt:
+        full_prompt = locked_prompt
+    else:
+        # Sync SceneState with the turn being illustrated so the Scene State panel matches the picture
+        turn_user_text = ""
+        turn_assistant_text = target_msg.content if target_msg.role == "assistant" else ""
         if target_msg.role == "user":
             turn_user_text = target_msg.content
         else:
@@ -1236,17 +1245,13 @@ async def illustrate_chat_message(
                 if m.role == "user" and m.content.strip():
                     turn_user_text = m.content
                     break
-    session.scene_state = await update_scene_state(
-        config=storage.config,
-        previous_state=session.scene_state,
-        user_text=turn_user_text,
-        assistant_text=turn_assistant_text,
-        world_aesthetic=world.aesthetic_style if world else "",
-    )
-
-    if custom_prompt:
-        full_prompt = custom_prompt
-    else:
+        session.scene_state = await update_scene_state(
+            config=storage.config,
+            previous_state=session.scene_state,
+            user_text=turn_user_text,
+            assistant_text=turn_assistant_text,
+            world_aesthetic=world.aesthetic_style if world else "",
+        )
         full_prompt = await build_contextual_scene_prompt(
             config=storage.config,
             character=card,
@@ -1278,6 +1283,8 @@ async def illustrate_chat_message(
     )
     target_msg.image_url = img_meta["url"]
     target_msg.image_prompt = full_prompt
+    target_msg.image_seed = img_meta["seed"]
+    target_msg.image_metadata_url = img_meta.get("metadata_url")
     if not target_msg.triggered_lore and lore_res.triggered:
         target_msg.triggered_lore = lore_res.triggered
     session.updated_at = utc_now_iso()
@@ -1303,6 +1310,7 @@ async def illustrate_chat_message(
         width=img_meta["width"],
         height=img_meta["height"],
         seed=img_meta["seed"],
+        metadata_url=img_meta.get("metadata_url"),
         character_id=card.id if card else None,
         world_id=session.world_id,
         location_entry_id=matched_loc_id,
@@ -1633,6 +1641,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         width=img_meta["width"],
         height=img_meta["height"],
         seed=img_meta["seed"],
+        metadata_url=img_meta.get("metadata_url"),
         character_id=card.id if card else None,
         world_id=world.id if world else None,
         location_entry_id=matched_loc_id,
