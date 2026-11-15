@@ -983,6 +983,47 @@ def test_image_metadata_sidecar_and_reuse_prompt_new_seed(tmp_path: Path, monkey
             main_mod.storage.gallery.pop(0)
 
 
+def test_prompt_templates_across_pipelines() -> None:
+    from backend.inference.llm_engine import render_prompt_template
+
+    parts = render_prompt_template(
+        "{quality}, custom_film_grain, {location_lore}, {missing_slot}, {unknown_brace}",
+        {
+            "quality": "masterpiece",
+            "location_lore": "sunlit garden villa",
+            "missing_slot": "",
+        },
+    )
+    assert parts == ["masterpiece", "custom_film_grain", "sunlit garden villa", "{unknown_brace}"]
+
+    # Verify build_contextual_scene_prompt uses config.scene_prompt_template ordering
+    cfg = InferenceConfig(
+        llm_provider="ollama",
+        ollama_base_url="http://127.0.0.1:9",
+        scene_prompt_template="cinematic_template_tag, {location_lore}, {scene_state}, {character_traits}",
+    )
+    card = CharacterCard(
+        name="Elena",
+        visual_prompt_tags="1girl, chestnut hair",
+    )
+    msg = ChatMessage(role="assistant", sender_name="Elena", content="*She walks onto the terrace.*")
+    state = SceneState(location="Garden Villa", attire="white sundress")
+    prompt = asyncio.run(
+        build_contextual_scene_prompt(
+            config=cfg,
+            character=card,
+            messages=[msg],
+            target_msg=msg,
+            lore_visuals="garden villa hedges",
+            scene_state=state,
+        )
+    )
+    assert prompt.startswith("cinematic_template_tag")
+    assert "garden villa hedges" in prompt
+    assert "chestnut hair" in prompt
+    assert prompt.index("garden villa hedges") < prompt.index("chestnut hair")
+
+
 
 
 

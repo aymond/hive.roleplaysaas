@@ -32,6 +32,7 @@ from .inference.llm_engine import (
     format_scene_state_tags,
     generate_roleplay_reply,
     harmonize_sdxl_prompt,
+    render_prompt_template,
     stream_roleplay_reply,
     update_scene_state,
 )
@@ -327,7 +328,15 @@ async def generate_character_avatar(char_id: str, seed: int | None = None) -> di
         world_style = storage.worlds[card.world_id].aesthetic_style
 
     base_tags = card.visual_prompt_tags or f"portrait of {card.name}, {card.title}, {card.personality}"
-    full_prompt = ", ".join(p for p in [base_tags, world_style, "masterpiece character portrait, 8k"] if p)
+    portrait_parts = render_prompt_template(
+        storage.config.portrait_prompt_template,
+        {
+            "character_traits": base_tags,
+            "world_style": world_style,
+            "portrait_style": "masterpiece character portrait, 8k",
+        },
+    )
+    full_prompt = ", ".join(portrait_parts)
 
     img_meta = await generate_image_asset(
         config=storage.config,
@@ -628,7 +637,17 @@ def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -
         base_style = "top-down cartographic map, realistic terrain relief, overhead satellite view"
         closing = "roads, terrain, compass rose"
 
-    return ", ".join(p for p in (base_style, landmarks, codex_geo, closing) if p)
+    map_parts = render_prompt_template(
+        storage.config.world_map_prompt_template,
+        {
+            "map_style": base_style,
+            "landmarks": landmarks,
+            "world_geography": codex_geo,
+            "map_closing": closing,
+            "world_name": world.name,
+        },
+    )
+    return ", ".join(map_parts)
 
 
 @app.post("/api/worlds/{world_id}/generate-map")
@@ -736,16 +755,22 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
         and target_entry.visual_description.strip().lower() != _DEFAULT_VISUAL_DESC
         else ""
     )
-    prompt_parts = [
-        target_entry.title.strip(),
-        target_entry.content.strip()[:220] if target_entry.content else "",
-        custom_vis,
-        world.aesthetic_style,
+    category_style = (
         "architectural environment scene, wide angle, high detail"
         if target_entry.category == "location"
-        else f"{target_entry.category} concept art, high detail",
-    ]
-    full_prompt = ", ".join(p for p in prompt_parts if p)
+        else f"{target_entry.category} concept art, high detail"
+    )
+    prompt_parts = render_prompt_template(
+        storage.config.location_prompt_template,
+        {
+            "title": target_entry.title.strip(),
+            "lore_content": target_entry.content.strip()[:220] if target_entry.content else "",
+            "custom_visuals": custom_vis,
+            "world_style": world.aesthetic_style,
+            "category_style": category_style,
+        },
+    )
+    full_prompt = ", ".join(prompt_parts)
 
     is_location = target_entry.category == "location"
     img_meta = await generate_image_asset(
@@ -1583,16 +1608,22 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         scene_text=scene_focus,
         distilled_keywords=harmonized_kw,
     )
-    if anat_boost:
-        prompt_segments.append(anat_boost)
-    if session_state_tags:
-        prompt_segments.append(session_state_tags)
-    if char_traits:
-        prompt_segments.append(char_traits)
-    if cleaned_harmonized_kw:
-        prompt_segments.append(cleaned_harmonized_kw)
-
-    final_tags = dedupe_and_resolve_prompt_conflicts(prompt_segments, scene_text=scene_focus)
+    templated_studio_parts = render_prompt_template(
+        storage.config.studio_prompt_template,
+        {
+            "quality": quality_prefix,
+            "anatomical_overrides": anat_boost,
+            "scene_state": session_state_tags,
+            "character_traits": char_traits,
+            "location_lore": lore_visuals_to_distill,
+            "dialog_scene": req.custom_prompt.strip(),
+            "harmonized_scene": cleaned_harmonized_kw,
+            "style": style_suffix,
+        },
+    )
+    if cleaned_harmonized_kw and "{harmonized_scene}" not in storage.config.studio_prompt_template:
+        templated_studio_parts.append(cleaned_harmonized_kw)
+    final_tags = dedupe_and_resolve_prompt_conflicts(templated_studio_parts, scene_text=scene_focus)
     assembled_prompt = ", ".join(final_tags)
 
     neg_prompt = card.negative_prompt_tags if card else "blurry, low quality, deformed, watermark"

@@ -515,6 +515,73 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
               )}
             </div>
 
+            <details className="rounded-xl border border-white/10 bg-[#0d111b]/80 p-3 space-y-2.5">
+              <summary className="text-xs font-bold uppercase tracking-wider text-cyan-300 cursor-pointer select-none flex items-center justify-between">
+                <span>Prompt Integration Templates (Scene, Studio, Portrait, Location, Map)</span>
+                <span className="text-[10px] font-normal text-slate-400">Expand to customize</span>
+              </summary>
+              <div className="pt-2 space-y-2.5">
+                {[
+                  {
+                    key: 'scene_prompt_template' as const,
+                    label: 'Chat Scene Illustration Template',
+                    fallback:
+                      '{quality}, {anatomical_overrides}, {solo}, {action_tags}, {character_traits}, {scene_state}, {location_lore}, {dialog_scene}',
+                    hint: 'Placeholders: {quality}, {anatomical_overrides}, {solo}, {action_tags}, {character_traits}, {scene_state}, {location_lore}, {dialog_scene}, {style}',
+                  },
+                  {
+                    key: 'studio_prompt_template' as const,
+                    label: 'Image Studio (Backstory-Grounded) Template',
+                    fallback:
+                      '{quality}, {anatomical_overrides}, {scene_state}, {character_traits}, {location_lore}, {dialog_scene}',
+                    hint: 'Placeholders: {quality}, {anatomical_overrides}, {scene_state}, {character_traits}, {location_lore}, {dialog_scene}, {harmonized_scene}, {style}',
+                  },
+                  {
+                    key: 'portrait_prompt_template' as const,
+                    label: 'Character Portrait Template',
+                    fallback: '{character_traits}, {world_style}, {portrait_style}',
+                    hint: 'Placeholders: {character_traits}, {world_style}, {portrait_style}',
+                  },
+                  {
+                    key: 'location_prompt_template' as const,
+                    label: 'Location / Lore Entry Template',
+                    fallback: '{title}, {lore_content}, {custom_visuals}, {world_style}, {category_style}',
+                    hint: 'Placeholders: {title}, {lore_content}, {custom_visuals}, {world_style}, {category_style}',
+                  },
+                  {
+                    key: 'world_map_prompt_template' as const,
+                    label: 'World Map Template',
+                    fallback: '{map_style}, {landmarks}, {world_geography}, {map_closing}',
+                    hint: 'Placeholders: {map_style}, {landmarks}, {world_geography}, {map_closing}, {world_name}',
+                  },
+                ].map((tpl) => (
+                  <div key={tpl.key} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-slate-300">{tpl.label}</label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraftConfig({ ...draftConfig, [tpl.key]: tpl.fallback })
+                        }
+                        className="text-[10px] text-cyan-300 hover:underline cursor-pointer"
+                      >
+                        Reset Default
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={draftConfig[tpl.key] ?? tpl.fallback}
+                      onChange={(e) =>
+                        setDraftConfig({ ...draftConfig, [tpl.key]: e.target.value })
+                      }
+                      className="w-full bg-[#121724] border border-white/15 rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-cyan-400"
+                    />
+                    <p className="text-[10px] text-slate-500">{tpl.hint}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
+
             <div className="flex items-center gap-4 pt-1">
               <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
                 <input

@@ -1677,6 +1677,24 @@ def extract_action_and_scene_beats(messages: list[ChatMessage], target_msg: Chat
     return user_intent, char_actions
 
 
+def render_prompt_template(template: str, variables: dict[str, str]) -> list[str]:
+    """
+    Safely substitutes `{key}` placeholders in a prompt template and returns
+    non-empty comma-separated prompt segments, leaving unknown braces intact.
+    """
+    if not template or not template.strip():
+        return [v.strip() for v in variables.values() if v and v.strip()]
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key in variables:
+            return (variables.get(key) or "").strip()
+        return match.group(0)
+
+    rendered = re.sub(r"\{([a-zA-Z0-9_]+)\}", _replace, template)
+    return [seg.strip() for seg in rendered.split(",") if seg.strip()]
+
+
 async def build_contextual_scene_prompt(
     config: InferenceConfig,
     character: CharacterCard | None,
@@ -1771,8 +1789,27 @@ async def build_contextual_scene_prompt(
         else ""
     )
     action_tags = "dynamic action shot, mid-motion, candid full body, natural physics" if action_scene else ""
+    template = getattr(
+        config,
+        "scene_prompt_template",
+        "{quality}, {anatomical_overrides}, {solo}, {action_tags}, {character_traits}, {scene_state}, {location_lore}, {dialog_scene}",
+    )
+    templated_parts = render_prompt_template(
+        template,
+        {
+            "quality": quality_prefix,
+            "anatomical_overrides": anat_boost,
+            "solo": solo_tag,
+            "action_tags": action_tags,
+            "character_traits": physical_traits,
+            "scene_state": state_tags,
+            "location_lore": effective_lore_visuals,
+            "dialog_scene": cleaned_harmonized_kw,
+            "style": style_suffix,
+        },
+    )
     final_tags = dedupe_and_resolve_prompt_conflicts(
-        [quality_prefix, anat_boost, solo_tag, action_tags, state_tags, physical_traits, cleaned_harmonized_kw],
+        templated_parts,
         scene_text=scene_focus,
     )
     final_prompt = ", ".join(final_tags)

@@ -217,6 +217,17 @@ class InferenceConfig(BaseModel):
     default_height: int = 1024
     default_steps: int = 20
     default_cfg: float = 6.0
+    scene_prompt_template: str = (
+        "{quality}, {anatomical_overrides}, {solo}, {action_tags}, "
+        "{character_traits}, {scene_state}, {location_lore}, {dialog_scene}"
+    )
+    studio_prompt_template: str = (
+        "{quality}, {anatomical_overrides}, {scene_state}, "
+        "{character_traits}, {location_lore}, {dialog_scene}"
+    )
+    portrait_prompt_template: str = "{character_traits}, {world_style}, {portrait_style}"
+    location_prompt_template: str = "{title}, {lore_content}, {custom_visuals}, {world_style}, {category_style}"
+    world_map_prompt_template: str = "{map_style}, {landmarks}, {world_geography}, {map_closing}"
 
 
 class GalleryAsset(BaseModel):

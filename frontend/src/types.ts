@@ -200,6 +200,11 @@ export interface InferenceConfig {
   default_height: number;
   default_steps: number;
   default_cfg: number;
+  scene_prompt_template?: string;
+  studio_prompt_template?: string;
+  portrait_prompt_template?: string;
+  location_prompt_template?: string;
+  world_map_prompt_template?: string;
 }
 
 export interface SystemStatus {
