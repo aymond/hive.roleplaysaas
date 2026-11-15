@@ -587,10 +587,35 @@ async def _run_comfyui_bridge(
             stage2_prompt = prompt
         else:
             stage1_prompt = prompt
-            stage2_prompt = (
-                f"masterpiece stylized glamour digital art, natural beautiful face, warm golden hour sunset rim lighting, "
-                f"luminous bronze and amber color grading, {clean_non_pony_prompt}"
+            has_explicit_lighting = any(
+                k in clean_non_pony_prompt.lower()
+                for k in (
+                    "night",
+                    "moonlight",
+                    "candlelight",
+                    "neon",
+                    "overcast",
+                    "rain",
+                    "dawn",
+                    "dusk",
+                    "sunset",
+                    "golden hour",
+                    "lantern",
+                    "studio lighting",
+                    "sunlight",
+                    "midday",
+                    "morning",
+                    "noon",
+                    "lighting",
+                )
             )
+            if has_explicit_lighting:
+                stage2_prompt = f"masterpiece stylized glamour digital art, natural beautiful face, {clean_non_pony_prompt}"
+            else:
+                stage2_prompt = (
+                    f"masterpiece stylized glamour digital art, natural beautiful face, warm golden hour sunset rim lighting, "
+                    f"luminous bronze and amber color grading, {clean_non_pony_prompt}"
+                )
 
         workflow_payload: dict[str, Any] = {
             "4": {

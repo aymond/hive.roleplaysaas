@@ -1759,7 +1759,12 @@ async def build_contextual_scene_prompt(
         )
 
     effective_lore_visuals = lore_visuals
-    if scene_state and (scene_state.location or "").strip() and lore_visuals:
+    if (
+        scene_state
+        and "location" in (scene_state.pinned_fields or [])
+        and (scene_state.location or "").strip()
+        and lore_visuals
+    ):
         loc_words = {
             w for w in re.findall(r"[a-z0-9]+", scene_state.location.lower())
             if len(w) >= 4

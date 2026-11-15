@@ -1023,6 +1023,21 @@ def test_prompt_templates_across_pipelines() -> None:
     assert "chestnut hair" in prompt
     assert prompt.index("garden villa hedges") < prompt.index("chestnut hair")
 
+    # Verify lore_visuals is preserved even when scene_state.location uses different words
+    non_overlapping_state = SceneState(location="Private Terrace", attire="white sundress")
+    prompt_with_lore = asyncio.run(
+        build_contextual_scene_prompt(
+            config=cfg,
+            character=card,
+            messages=[msg],
+            target_msg=msg,
+            lore_visuals="turquoise ocean waves, glowing lanterns",
+            scene_state=non_overlapping_state,
+        )
+    )
+    assert "turquoise ocean waves" in prompt_with_lore
+    assert "glowing lanterns" in prompt_with_lore
+
 
 
 
