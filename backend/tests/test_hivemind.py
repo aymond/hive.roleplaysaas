@@ -1051,6 +1051,29 @@ def test_tavern_system_prompt_guardrails_and_placeholder_filter() -> None:
     assert "before the fracture" not in sys_prompt
 
 
+def test_delete_chat_message_removes_from_history_and_memory() -> None:
+    import backend.main as main_mod
+    from backend.models import ChatSession
+
+    sess = ChatSession(
+        title="Delete Message Test",
+        character_id="char_lyra",
+        messages=[
+            ChatMessage(id="msg-keep", role="user", sender_name="Traveler", content="Hello"),
+            ChatMessage(id="msg-drop", role="assistant", sender_name="Lyra", content="Word salad"),
+        ],
+    )
+    main_mod.storage.chats[sess.id] = sess
+    try:
+        client = TestClient(app)
+        resp = client.delete(f"/api/chats/{sess.id}/messages/msg-drop")
+        assert resp.status_code == 200
+        msgs = resp.json()["session"]["messages"]
+        assert [m["id"] for m in msgs] == ["msg-keep"]
+    finally:
+        main_mod.storage.chats.pop(sess.id, None)
+
+
 
 
 

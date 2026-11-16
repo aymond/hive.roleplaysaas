@@ -862,6 +862,20 @@ async def delete_chat_session(chat_id: str) -> dict[str, str]:
     return {"status": "deleted"}
 
 
+@app.delete("/api/chats/{chat_id}/messages/{msg_id}")
+async def delete_chat_message(chat_id: str, msg_id: str) -> dict[str, Any]:
+    session = storage.chats.get(chat_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    before = len(session.messages)
+    session.messages = [m for m in session.messages if m.id != msg_id]
+    if len(session.messages) == before:
+        raise HTTPException(status_code=404, detail="Message not found")
+    session.updated_at = utc_now_iso()
+    storage.save()
+    return {"session": session.model_dump()}
+
+
 @app.post("/api/chats/{chat_id}/messages")
 async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, Any]:
     session = storage.chats.get(chat_id)

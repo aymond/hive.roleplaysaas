@@ -283,6 +283,16 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     }
   };
 
+  const handleDeleteMessage = async (msgId: string) => {
+    if (!activeSession) return;
+    if (!window.confirm('Remove this message from the conversation history and LLM memory?')) {
+      return;
+    }
+    const res = await api.deleteChatMessage(activeSession.id, msgId);
+    const nextChats = chats.map((c) => (c.id === res.session.id ? res.session : c));
+    onChatsUpdated(nextChats);
+  };
+
   const handleGenerateBackstoryImage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!backstoryPrompt.trim() || generatingBackstoryImg) return;
@@ -843,31 +853,42 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                           )}
                         </div>
 
-                        {isAssistant && (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleSwipe(msg.id, 'prev')}
-                              disabled={currentSwipe <= 1 || isSwipingThis}
-                              className="p-1 rounded hover:bg-white/10 disabled:opacity-30 cursor-pointer"
-                              title="Previous swipe"
-                            >
-                              <ChevronLeft className="w-3.5 h-3.5" />
-                            </button>
-                            <span className="text-[11px] font-mono px-1">
-                              {isSwipingThis ? '...' : `${currentSwipe}/${swipeCount}`}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleSwipe(msg.id, 'next')}
-                              disabled={isSwipingThis}
-                              className="p-1 rounded hover:bg-white/10 disabled:opacity-30 cursor-pointer"
-                              title="Generate / Next swipe variation"
-                            >
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {isAssistant && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleSwipe(msg.id, 'prev')}
+                                disabled={currentSwipe <= 1 || isSwipingThis}
+                                className="p-1 rounded hover:bg-white/10 disabled:opacity-30 cursor-pointer"
+                                title="Previous swipe"
+                              >
+                                <ChevronLeft className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="text-[11px] font-mono px-1">
+                                {isSwipingThis ? '...' : `${currentSwipe}/${swipeCount}`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleSwipe(msg.id, 'next')}
+                                disabled={isSwipingThis}
+                                className="p-1 rounded hover:bg-white/10 disabled:opacity-30 cursor-pointer"
+                                title="Generate / Next swipe variation"
+                              >
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            className="p-1 rounded hover:bg-rose-500/20 text-slate-500 hover:text-rose-300 cursor-pointer transition"
+                            title="Remove this message from conversation history and LLM memory"
+                            aria-label="Remove message"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

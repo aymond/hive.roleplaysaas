@@ -127,6 +127,10 @@ export const api = {
     }),
   deleteChat: (chatId: string) =>
     request<{ status: string }>(`/api/chats/${chatId}`, { method: 'DELETE' }),
+  deleteChatMessage: (chatId: string, msgId: string) =>
+    request<{ session: ChatSession }>(`/api/chats/${chatId}/messages/${msgId}`, {
+      method: 'DELETE',
+    }),
   sendMessage: (chatId: string, content: string, illustrateScene = false) =>
     request<{
       session: ChatSession;
