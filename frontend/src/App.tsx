@@ -7,6 +7,7 @@ import {
   Settings,
   Cpu,
   Sparkles,
+  ShieldAlert,
 } from 'lucide-react';
 import { api } from './api';
 import type {
@@ -21,6 +22,7 @@ import { CharacterForge } from './components/CharacterForge';
 import { WorldCodex } from './components/WorldCodex';
 import { AssetGallery } from './components/AssetGallery';
 import { EngineSettingsModal } from './components/EngineSettingsModal';
+import { AdminModerationModal } from './components/AdminModerationModal';
 
 type StudioTab = 'chat' | 'characters' | 'worlds' | 'gallery';
 
@@ -33,6 +35,7 @@ export const App: React.FC = () => {
   const [activeChatId, setActiveChatId] = useState<string>('');
   const [gallery, setGallery] = useState<GalleryAsset[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [moderationOpen, setModerationOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
@@ -179,6 +182,16 @@ export const App: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setModerationOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-emerald-200 flex items-center gap-1.5 cursor-pointer"
+            title="Admin SFW Trigger-Word Moderation Policy"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">SFW Guard</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setSettingsOpen(true)}
             className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer"
           >
@@ -250,6 +263,11 @@ export const App: React.FC = () => {
         onClose={() => setSettingsOpen(false)}
         status={status}
         onStatusUpdated={refreshStatus}
+      />
+
+      <AdminModerationModal
+        isOpen={moderationOpen}
+        onClose={() => setModerationOpen(false)}
       />
     </div>
   );

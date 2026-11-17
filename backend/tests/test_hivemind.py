@@ -535,7 +535,7 @@ def test_scene_state_injected_directly_into_scene_prompt(monkeypatch) -> None:
     )
     prompt = asyncio.run(
         build_contextual_scene_prompt(
-            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors"),
+            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors", sfw_mode=False),
             char,
             [msg],
             msg,
@@ -568,7 +568,7 @@ def test_dynamic_action_scene_strips_portrait_bias(monkeypatch) -> None:
     )
     prompt = asyncio.run(
         build_contextual_scene_prompt(
-            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors"),
+            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors", sfw_mode=False),
             char,
             [msg],
             msg,
@@ -633,7 +633,7 @@ def test_naked_kiss_strips_stale_jumpsuit_and_updates_scene_state(monkeypatch) -
     asst_msg = ChatMessage(role="assistant", sender_name="Liamching", content="*Liamching stepped closer, completely naked, ready to kiss.*")
     prompt = asyncio.run(
         build_contextual_scene_prompt(
-            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors"),
+            InferenceConfig(comfyui_checkpoint="CyberRealisticPony_V18.0_F16.safetensors", sfw_mode=False),
             char,
             [user_msg, asst_msg],
             asst_msg,
@@ -716,6 +716,8 @@ def test_illustrate_chat_message_syncs_scene_state(monkeypatch) -> None:
             ChatMessage(role="assistant", sender_name="Liamching", content="*The suit fell away completely.*"),
         ],
     )
+    prev_sfw = storage.config.sfw_mode
+    storage.config.sfw_mode = False
     storage.chats[sess.id] = sess
     try:
         client = TestClient(app)
@@ -724,6 +726,7 @@ def test_illustrate_chat_message_syncs_scene_state(monkeypatch) -> None:
         data = resp.json()
         assert data["session"]["scene_state"]["attire"] == "completely nude"
     finally:
+        storage.config.sfw_mode = prev_sfw
         storage.chats.pop(sess.id, None)
 
 
@@ -1071,6 +1074,89 @@ def test_delete_chat_message_removes_from_history_and_memory() -> None:
         msgs = resp.json()["session"]["messages"]
         assert [m["id"] for m in msgs] == ["msg-keep"]
     finally:
+        main_mod.storage.chats.pop(sess.id, None)
+
+
+def test_sfw_moderation_blocks_before_llm_and_admin_rbac(monkeypatch) -> None:
+    import backend.main as main_mod
+    from backend.models import ChatSession, ModerationPolicy
+
+    llm_calls = 0
+    img_calls = 0
+
+    async def fail_if_called_llm(*args, **kwargs):
+        nonlocal llm_calls
+        llm_calls += 1
+        return "should not run", "mock"
+
+    async def fail_if_called_img(*args, **kwargs):
+        nonlocal img_calls
+        img_calls += 1
+        return {"url": "/media/generated/nope.png", "provider": "mock", "width": 512, "height": 512, "seed": 1}
+
+    monkeypatch.setattr(main_mod, "generate_roleplay_reply", fail_if_called_llm)
+    monkeypatch.setattr(main_mod, "generate_image_asset", fail_if_called_img)
+
+    prev_policy = main_mod.storage.moderation_policy.model_copy(deep=True)
+    prev_sfw = main_mod.storage.config.sfw_mode
+    main_mod.storage.config.sfw_mode = True
+    sess = ChatSession(title="Moderation Test", character_id=next(iter(main_mod.storage.characters.keys())))
+    main_mod.storage.chats[sess.id] = sess
+
+    try:
+        client = TestClient(app)
+
+        # 1. Non-admin cannot read/update moderation policy
+        r_user = client.get("/api/admin/moderation", headers={"X-Mock-Role": "user"})
+        assert r_user.status_code == 403
+
+        # 2. Admin adds custom trigger word
+        custom_policy = ModerationPolicy(
+            enabled=True,
+            mode="block",
+            trigger_words=["forbiddenword", "nude"],
+        )
+        r_put = client.put("/api/admin/moderation", json=custom_policy.model_dump())
+        assert r_put.status_code == 200
+        assert "forbiddenword" in r_put.json()["trigger_words"]
+
+        # 3. Chat message with trigger word is blocked (422) BEFORE any LLM call
+        r_chat = client.post(
+            f"/api/chats/{sess.id}/messages",
+            json={"content": "Tell me about forbiddenword in the garden", "illustrate_scene": False},
+        )
+        assert r_chat.status_code == 422
+        assert "forbiddenword" in r_chat.json()["detail"].lower()
+
+        # 4. Character card with trigger word is blocked (422) BEFORE any image call
+        r_char = client.post(
+            "/api/characters",
+            json={"name": "BadCard", "description": "Contains forbiddenword in backstory"},
+        )
+        assert r_char.status_code == 422
+
+        # 5. World/Lore entry with trigger word is blocked (422)
+        r_world = client.post(
+            "/api/worlds",
+            json={
+                "name": "BadWorld",
+                "entries": [
+                    {
+                        "title": "Secret Cove",
+                        "category": "location",
+                        "keys": ["cove"],
+                        "content": "A forbiddenword landmark.",
+                    }
+                ],
+            },
+        )
+        assert r_world.status_code == 422
+
+        assert llm_calls == 0
+        assert img_calls == 0
+    finally:
+        main_mod.storage.moderation_policy = prev_policy
+        main_mod.storage.config.sfw_mode = prev_sfw
         main_mod.storage.chats.pop(sess.id, None)
 
 

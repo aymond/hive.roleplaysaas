@@ -1795,10 +1795,13 @@ async def build_contextual_scene_prompt(
     )
 
     scene_focus = f"{user_intent} {char_actions or target_msg.content}"
-    anat_boost, cleaned_harmonized_kw, _ = build_anatomical_and_clothing_overrides(
-        scene_text=f"{scene_focus} {state_tags}",
-        distilled_keywords=harmonized_tags,
-    )
+    if getattr(config, "sfw_mode", True):
+        anat_boost, cleaned_harmonized_kw = "", harmonized_tags
+    else:
+        anat_boost, cleaned_harmonized_kw, _ = build_anatomical_and_clothing_overrides(
+            scene_text=f"{scene_focus} {state_tags}",
+            distilled_keywords=harmonized_tags,
+        )
 
     solo_tag = (
         "solo"

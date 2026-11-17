@@ -182,9 +182,10 @@ class WorkflowExecutionResult(BaseModel):
 
 class InferenceConfig(BaseModel):
     log_level: Literal["INFO", "DEBUG"] = "INFO"
+    sfw_mode: bool = True
     llm_provider: Literal["auto", "ollama", "openai_compat", "builtin_synth"] = "auto"
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "llama3.2:latest"
+    ollama_model: str = "qwen2.5:14b"
     prompt_refiner_model: str = "llama3.2:latest"
     openai_base_url: str = "http://127.0.0.1:1234/v1"
     openai_api_key: str = "lm-studio"
@@ -192,12 +193,24 @@ class InferenceConfig(BaseModel):
     temperature: float = 0.75
     max_tokens: int = 512
 
-    image_provider: Literal["auto", "mps_diffusers", "comfyui", "procedural_art"] = "auto"
+    image_provider: Literal[
+        "auto",
+        "mps_diffusers",
+        "comfyui",
+        "vertex_imagen",
+        "runpod_serverless",
+        "procedural_art",
+    ] = "auto"
+    vertex_project_id: str = ""
+    vertex_location: str = "europe-west4"
+    vertex_imagen_model: str = "imagen-3.0-generate-002"
+    runpod_endpoint_id: str = ""
+    runpod_api_key: str = ""
     mps_model_id: str = "segmind/tiny-sd"
     mps_use_fp16: bool = True
     mps_attention_slicing: bool = True
     comfyui_base_url: str = "http://127.0.0.1:8188"
-    comfyui_checkpoint: str = "CyberRealisticPony_V18.0_F16.safetensors"
+    comfyui_checkpoint: str = "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
     comfyui_render_mode: Literal[
         "hybrid_refiner",
         "single_stylized",
@@ -246,3 +259,27 @@ class GalleryAsset(BaseModel):
     workflow_id: str | None = None
     duration_ms: float | None = None
     created_at: str = Field(default_factory=utc_now_iso)
+
+
+class ModerationPolicy(BaseModel):
+    enabled: bool = True
+    mode: Literal["block", "redact"] = "block"
+    trigger_words: list[str] = Field(
+        default_factory=lambda: [
+            "nude",
+            "naked",
+            "nudity",
+            "topless",
+            "nsfw",
+            "porn",
+            "explicit",
+            "erotic",
+            "nipples",
+            "genitals",
+            "underage",
+            "minor",
+        ]
+    )
+    regex_patterns: list[str] = Field(default_factory=list)
+    updated_by: str = "admin"
+    updated_at: str = Field(default_factory=utc_now_iso)

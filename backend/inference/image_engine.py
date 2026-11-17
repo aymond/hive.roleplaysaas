@@ -566,10 +566,14 @@ async def _run_comfyui_bridge(
 
     base_neg = (
         negative_prompt
-        or "score_4, score_5, score_6, blurry, low quality, flat lighting, washed out, oversaturated, burnt face, red nose, clown makeup, deformed, bad anatomy"
+        or "blurry, low quality, flat lighting, washed out, oversaturated, burnt face, red nose, clown makeup, deformed, bad anatomy"
     )
-    _, _, neg_clothing_blockers = build_anatomical_and_clothing_overrides(prompt)
-    neg_text = f"{base_neg}, {neg_clothing_blockers}" if neg_clothing_blockers else base_neg
+    if getattr(config, "sfw_mode", True):
+        sfw_blockers = "nsfw, nude, naked, topless, explicit, sexual, erotic, lingerie, cleavage"
+        neg_text = f"{base_neg}, {sfw_blockers}"
+    else:
+        _, _, neg_clothing_blockers = build_anatomical_and_clothing_overrides(prompt)
+        neg_text = f"{base_neg}, {neg_clothing_blockers}" if neg_clothing_blockers else base_neg
     if not any(m in prompt.lower() for m in ("2girls", "3girls", "two women", "multiple girls", "crowd", "group", "threesome")):
         neg_text = f"{neg_text}, 2girls, multiple girls, two women, duplicate, twins"
     if (is_pony_primary or is_pony_stage2) and "score_4" not in neg_text:
@@ -920,6 +924,104 @@ async def _run_comfyui_bridge(
     return None, ""
 
 
+async def _run_vertex_imagen(
+    config: InferenceConfig,
+    prompt: str,
+    negative_prompt: str,
+    width: int,
+    height: int,
+) -> tuple[bytes | None, str]:
+    """Configurable Vertex AI Imagen provider (uses GCP ADC)."""
+    project_id = (getattr(config, "vertex_project_id", "") or "").strip()
+    location = (getattr(config, "vertex_location", "europe-west4") or "europe-west4").strip()
+    model_id = (getattr(config, "vertex_imagen_model", "imagen-3.0-generate-002") or "imagen-3.0-generate-002").strip()
+    if not project_id:
+        logger.warning("⚠️ VERTEX⏭  | vertex_project_id not configured — skipping Vertex Imagen")
+        return None, ""
+    try:
+        import base64
+        import google.auth
+        import google.auth.transport.requests
+
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds.refresh(google.auth.transport.requests.Request())
+        aspect = "4:3" if width > height else ("3:4" if height > width else "1:1")
+        url = (
+            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}"
+            f"/locations/{location}/publishers/google/models/{model_id}:predict"
+        )
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {creds.token}"},
+                json={
+                    "instances": [{"prompt": prompt}],
+                    "parameters": {
+                        "sampleCount": 1,
+                        "aspectRatio": aspect,
+                        "negativePrompt": negative_prompt,
+                        "personGeneration": "allow_adult",
+                        "safetySetting": "block_medium_and_above",
+                    },
+                },
+            )
+            if resp.status_code == 200:
+                preds = resp.json().get("predictions", [])
+                if preds and preds[0].get("bytesBase64Encoded"):
+                    return base64.b64decode(preds[0]["bytesBase64Encoded"]), f"vertex_imagen ({model_id})"
+            logger.warning("⚠️ VERTEX   | status=%d body=%s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.warning("⚠️ VERTEX   | Vertex Imagen call failed: %s", exc)
+    return None, ""
+
+
+async def _run_runpod_serverless(
+    config: InferenceConfig,
+    prompt: str,
+    negative_prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    cfg: float,
+    seed: int,
+) -> tuple[bytes | None, str]:
+    """Configurable RunPod Serverless ComfyUI provider."""
+    endpoint_id = (getattr(config, "runpod_endpoint_id", "") or "").strip()
+    api_key = (getattr(config, "runpod_api_key", "") or "").strip()
+    if not endpoint_id or not api_key:
+        logger.warning("⚠️ RUNPOD⏭  | runpod_endpoint_id or runpod_api_key missing — skipping RunPod Serverless")
+        return None, ""
+    try:
+        import base64
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "input": {
+                        "prompt": prompt,
+                        "negative_prompt": negative_prompt,
+                        "width": width,
+                        "height": height,
+                        "steps": steps,
+                        "cfg": cfg,
+                        "seed": seed,
+                        "checkpoint": config.comfyui_checkpoint,
+                    }
+                },
+            )
+            if resp.status_code == 200:
+                out = resp.json().get("output") or {}
+                b64 = out.get("image_base64") or (out.get("images", [None])[0] if isinstance(out.get("images"), list) else None)
+                if isinstance(b64, str) and b64:
+                    return base64.b64decode(b64.split(",", 1)[-1]), f"runpod_serverless ({config.comfyui_checkpoint})"
+            logger.warning("⚠️ RUNPOD   | status=%d body=%s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.warning("⚠️ RUNPOD   | RunPod Serverless call failed: %s", exc)
+    return None, ""
+
+
 async def generate_image_asset(
     config: InferenceConfig,
     output_dir: Path,
@@ -959,8 +1061,34 @@ async def generate_image_asset(
         actual_seed,
     )
 
+    # 0. Try configured cloud providers when explicitly selected
+    if config.image_provider == "vertex_imagen":
+        img_bytes, vertex_label = await _run_vertex_imagen(
+            config=config,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=w,
+            height=h,
+        )
+        if img_bytes:
+            provider_used = vertex_label
+
+    if img_bytes is None and config.image_provider == "runpod_serverless":
+        img_bytes, runpod_label = await _run_runpod_serverless(
+            config=config,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=w,
+            height=h,
+            steps=st,
+            cfg=guidance,
+            seed=actual_seed,
+        )
+        if img_bytes:
+            provider_used = runpod_label
+
     # 1. Try ComfyUI if configured or auto
-    if config.image_provider in ("comfyui", "auto"):
+    if img_bytes is None and config.image_provider in ("comfyui", "auto"):
         img_bytes, comfy_label = await _run_comfyui_bridge(
             config=config,
             prompt=prompt,

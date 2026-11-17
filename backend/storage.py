@@ -12,6 +12,7 @@ from .models import (
     InferenceConfig,
     Lorebook,
     LoreEntry,
+    ModerationPolicy,
     TriggeredLoreInfo,
     WorkflowEdge,
     WorkflowGraph,
@@ -29,6 +30,7 @@ class StudioStorage:
         self.state_file = self.base_dir / "studio_state.json"
 
         self.config: InferenceConfig = InferenceConfig()
+        self.moderation_policy: ModerationPolicy = ModerationPolicy()
         self.characters: dict[str, CharacterCard] = {}
         self.worlds: dict[str, Lorebook] = {}
         self.chats: dict[str, ChatSession] = {}
@@ -49,6 +51,7 @@ class StudioStorage:
             try:
                 raw = json.loads(self.state_file.read_text(encoding="utf-8"))
                 self.config = InferenceConfig.model_validate(raw.get("config", {}))
+                self.moderation_policy = ModerationPolicy.model_validate(raw.get("moderation_policy", {}))
                 self.characters = {
                     k: CharacterCard.model_validate(v) for k, v in raw.get("characters", {}).items()
                 }
@@ -73,6 +76,7 @@ class StudioStorage:
     def save(self) -> None:
         payload = {
             "config": self.config.model_dump(),
+            "moderation_policy": self.moderation_policy.model_dump(),
             "characters": {k: v.model_dump() for k, v in self.characters.items()},
             "worlds": {k: v.model_dump() for k, v in self.worlds.items()},
             "chats": {k: v.model_dump() for k, v in self.chats.items()},

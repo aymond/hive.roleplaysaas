@@ -297,10 +297,22 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
                     PyTorch Metal MPS Diffusers (Downloads HF Model if needed)
                   </option>
                   <option value="comfyui">External ComfyUI API Server (localhost:8188)</option>
+                  <option value="vertex_imagen">Google Cloud Vertex AI Imagen (SFW Managed)</option>
+                  <option value="runpod_serverless">RunPod Serverless ComfyUI (Pay-per-second)</option>
                   <option value="procedural_art">
                     Instant Procedural Concept Art Synth (&lt;150ms)
                   </option>
                 </select>
+                <label className="mt-2 flex items-center gap-1.5 text-xs text-emerald-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draftConfig.sfw_mode ?? true}
+                    onChange={(e) =>
+                      setDraftConfig({ ...draftConfig, sfw_mode: e.target.checked })
+                    }
+                  />
+                  Enforce SFW Mode (Pre-flight trigger-word filter + SFW negative blockers)
+                </label>
               </div>
               <div>
                 <label className="block text-xs text-slate-300 mb-1">

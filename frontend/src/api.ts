@@ -303,4 +303,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // Admin SFW Moderation Policy
+  getModerationPolicy: () => request<import('./types').ModerationPolicy>('/api/admin/moderation'),
+  updateModerationPolicy: (policy: import('./types').ModerationPolicy) =>
+    request<import('./types').ModerationPolicy>('/api/admin/moderation', {
+      method: 'PUT',
+      body: JSON.stringify(policy),
+    }),
+  testModerationPolicy: (text: string) =>
+    request<{ blocked: boolean; matched_terms: string[]; sanitized_texts: string[] }>(
+      '/api/admin/moderation/test',
+      {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+      }
+    ),
 };

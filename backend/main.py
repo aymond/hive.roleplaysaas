@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,10 +45,14 @@ from .models import (
     GalleryAsset,
     InferenceConfig,
     Lorebook,
+    ModerationPolicy,
     SceneState,
     WorkflowGraph,
     utc_now_iso,
 )
+from .auth import AuthenticatedUser, require_admin
+from .billing import router as billing_router
+from .moderation import enforce_moderation_or_422, scan_for_trigger_words
 from .storage import StudioStorage
 from .tavern_card import (
     character_to_tavern_v2_dict,
@@ -63,6 +67,7 @@ app = FastAPI(
     description="Apple Silicon Character, World Lorebook & ComfyUI-Style Node Workflow Engine",
     version="0.1.0",
 )
+app.include_router(billing_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -280,8 +285,70 @@ async def list_characters() -> list[CharacterCard]:
     return list(storage.characters.values())
 
 
+def _moderate_character(card: CharacterCard) -> None:
+    if not storage.config.sfw_mode:
+        return
+    enforce_moderation_or_422(
+        [
+            card.name,
+            card.title,
+            card.description,
+            card.personality,
+            card.scenario,
+            card.first_mes,
+            card.mes_example,
+            card.system_prompt,
+            card.visual_prompt_tags,
+        ],
+        storage.moderation_policy,
+        context_label="character card",
+    )
+
+
+def _moderate_world(world: Lorebook) -> None:
+    if not storage.config.sfw_mode:
+        return
+    texts = [world.name, world.subtitle, world.description, world.aesthetic_style]
+    for entry in world.entries:
+        texts.extend([entry.title, " ".join(entry.keys), entry.content, entry.visual_description])
+    enforce_moderation_or_422(texts, storage.moderation_policy, context_label="world & lore")
+
+
+class ModerationTestRequest(BaseModel):
+    text: str
+
+
+@app.get("/api/admin/moderation")
+async def get_admin_moderation_policy(
+    admin: AuthenticatedUser = Depends(require_admin),
+) -> ModerationPolicy:
+    return storage.moderation_policy
+
+
+@app.put("/api/admin/moderation")
+async def update_admin_moderation_policy(
+    policy: ModerationPolicy,
+    admin: AuthenticatedUser = Depends(require_admin),
+) -> ModerationPolicy:
+    policy.updated_by = admin.email or admin.uid
+    policy.updated_at = utc_now_iso()
+    storage.moderation_policy = policy
+    storage.save()
+    return storage.moderation_policy
+
+
+@app.post("/api/admin/moderation/test")
+async def test_admin_moderation_policy(
+    req: ModerationTestRequest,
+    admin: AuthenticatedUser = Depends(require_admin),
+) -> dict[str, Any]:
+    res = scan_for_trigger_words([req.text], storage.moderation_policy)
+    return res.model_dump()
+
+
 @app.post("/api/characters")
 async def create_character(card: CharacterCard) -> CharacterCard:
+    _moderate_character(card)
     if not card.avatar_url:
         prompt = card.visual_prompt_tags or f"portrait of {card.name}, {card.title}, fantasy character concept art"
         img_meta = await generate_image_asset(
@@ -299,6 +366,7 @@ async def create_character(card: CharacterCard) -> CharacterCard:
 
 @app.put("/api/characters/{char_id}")
 async def update_character(char_id: str, card: CharacterCard) -> CharacterCard:
+    _moderate_character(card)
     card.id = char_id
     card.updated_at = utc_now_iso()
     storage.characters[char_id] = card
@@ -496,6 +564,7 @@ async def list_worlds() -> list[Lorebook]:
 
 @app.post("/api/worlds")
 async def create_world(world: Lorebook) -> Lorebook:
+    _moderate_world(world)
     world.updated_at = utc_now_iso()
     if world.map_image_url:
         _auto_place_map_locations(world)
@@ -506,6 +575,7 @@ async def create_world(world: Lorebook) -> Lorebook:
 
 @app.put("/api/worlds/{world_id}")
 async def update_world(world_id: str, world: Lorebook) -> Lorebook:
+    _moderate_world(world)
     world.id = world_id
     if world.map_image_url:
         _auto_place_map_locations(world)
@@ -882,6 +952,9 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
+    if storage.config.sfw_mode:
+        enforce_moderation_or_422([req.content], storage.moderation_policy, context_label="chat message")
+
     card = storage.characters.get(session.character_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
@@ -1049,6 +1122,11 @@ async def stream_chat_message(chat_id: str, req: SendMessageRequest):
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
     world = storage.worlds.get(session.world_id) if session.world_id else None
+    if storage.config.sfw_mode:
+        enforce_moderation_or_422([req.content], storage.moderation_policy, context_label="chat message")
+        _moderate_character(card)
+        if world:
+            _moderate_world(world)
 
     user_msg = ChatMessage(
         role="user",
@@ -1238,6 +1316,8 @@ async def illustrate_chat_message(
     world = storage.worlds.get(session.world_id) if session.world_id else None
 
     custom_prompt = req.custom_prompt.strip() if (req and req.custom_prompt and req.custom_prompt.strip()) else None
+    if storage.config.sfw_mode and custom_prompt:
+        enforce_moderation_or_422([custom_prompt], storage.moderation_policy, context_label="scene prompt")
     reuse_prompt = bool(req and req.reuse_prompt and target_msg.image_prompt and target_msg.image_prompt.strip())
     locked_prompt = custom_prompt or (target_msg.image_prompt.strip() if reuse_prompt and target_msg.image_prompt else None)
     logger.info(
@@ -1269,6 +1349,19 @@ async def illustrate_chat_message(
     lore_visuals = lore_res.visual_tags_block or (
         "" if has_tracked_setting else (world.aesthetic_style if world else "")
     )
+
+    if storage.config.sfw_mode:
+        enforce_moderation_or_422(
+            [
+                target_msg.content,
+                lore_visuals,
+                session.scene_state.location,
+                session.scene_state.attire,
+                session.scene_state.pose_and_action,
+            ],
+            storage.moderation_policy,
+            context_label="scene illustration",
+        )
 
     t0 = time.perf_counter()
     if locked_prompt:
@@ -1530,6 +1623,12 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
 
     is_pony = "pony" in (storage.config.comfyui_checkpoint or "").lower()
     active_mode = req.render_mode or getattr(storage.config, "comfyui_render_mode", "hybrid_refiner")
+    if storage.config.sfw_mode:
+        enforce_moderation_or_422(
+            [req.custom_prompt],
+            storage.moderation_policy,
+            context_label="backstory image prompt",
+        )
     logger.info(
         "▶ ACTION   | generate_backstory_grounded_image(char=%r, world=%r, mode=%s, %dx%d, custom_prompt=%r)",
         card.name if card else "None",

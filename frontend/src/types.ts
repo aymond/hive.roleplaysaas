@@ -172,6 +172,7 @@ export interface WorkflowExecutionResult {
 export interface InferenceConfig {
   log_level?: 'INFO' | 'DEBUG';
   llm_provider: 'auto' | 'ollama' | 'openai_compat' | 'builtin_synth';
+  sfw_mode?: boolean;
   ollama_base_url: string;
   ollama_model: string;
   openai_base_url: string;
@@ -180,7 +181,18 @@ export interface InferenceConfig {
   temperature: number;
   max_tokens: number;
 
-  image_provider: 'auto' | 'mps_diffusers' | 'comfyui' | 'procedural_art';
+  image_provider:
+    | 'auto'
+    | 'mps_diffusers'
+    | 'comfyui'
+    | 'vertex_imagen'
+    | 'runpod_serverless'
+    | 'procedural_art';
+  vertex_project_id?: string;
+  vertex_location?: string;
+  vertex_imagen_model?: string;
+  runpod_endpoint_id?: string;
+  runpod_api_key?: string;
   mps_model_id: string;
   mps_use_fp16: boolean;
   mps_attention_slicing: boolean;
@@ -205,6 +217,15 @@ export interface InferenceConfig {
   portrait_prompt_template?: string;
   location_prompt_template?: string;
   world_map_prompt_template?: string;
+}
+
+export interface ModerationPolicy {
+  enabled: boolean;
+  mode: 'block' | 'redact';
+  trigger_words: string[];
+  regex_patterns: string[];
+  updated_by: string;
+  updated_at: string;
 }
 
 export interface SystemStatus {
