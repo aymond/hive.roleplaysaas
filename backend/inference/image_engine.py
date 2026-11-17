@@ -538,7 +538,7 @@ async def _run_comfyui_bridge(
         None,
     )
     use_action_hybrid = (
-        (active_mode == "action_hybrid" or (is_dynamic_action_scene(prompt) and active_mode != "single_raw"))
+        active_mode == "action_hybrid"
         and bool(action_base_ckpt)
         and action_base_ckpt != ckpt_to_use
     )
@@ -757,10 +757,11 @@ async def _run_comfyui_bridge(
         }
         provider_label = f"comfyui ({ckpt_to_use}, {active_mode})"
 
+    is_rear_view_prompt = any(k in prompt.lower() for k in ("from behind", "rear view", "back view"))
     want_face_detailer = (
         face_detailer_override
         if face_detailer_override is not None
-        else getattr(config, "comfyui_face_detailer_enabled", True)
+        else (getattr(config, "comfyui_face_detailer_enabled", True) and not is_rear_view_prompt)
     )
     face_detector_model = face_detectors[0] if (want_face_detailer and face_detectors) else None
 
