@@ -1107,6 +1107,7 @@ async def generate_image_asset(
     prefer_stylized_non_pony: bool = False,
     landscape_mode: bool = False,
     pipeline_role: str | None = None,
+    uid: str = "local-owner",
 ) -> dict[str, Any]:
     """
     Generates an image using the configured Image Engine (or specialist pipeline profile),
@@ -1242,11 +1243,10 @@ async def generate_image_asset(
     elapsed = time.perf_counter() - t_start
     duration_ms = round(elapsed * 1000, 1)
     meta_filename = file_path.with_suffix(".json").name
-    metadata_url = f"/media/generated/{meta_filename}"
     metadata_payload = {
         "filename": filename,
         "url": f"/media/generated/{filename}",
-        "metadata_url": metadata_url,
+        "metadata_url": f"/media/generated/{meta_filename}",
         "prompt": prompt,
         "negative_prompt": negative_prompt,
         "seed": actual_seed,
@@ -1261,7 +1261,24 @@ async def generate_image_asset(
         "duration_ms": duration_ms,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    file_path.with_suffix(".json").write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
+
+    from ..media_gcs import is_gcs_enabled, upload_media_pair
+
+    if is_gcs_enabled():
+        meta_bytes = json.dumps(metadata_payload, indent=2).encode("utf-8")
+        gcs_urls = upload_media_pair(uid, filename, img_bytes, meta_filename, meta_bytes)
+        if gcs_urls:
+            public_url, metadata_url = gcs_urls
+            metadata_payload["url"] = public_url
+            metadata_payload["metadata_url"] = metadata_url
+        else:
+            public_url = f"/media/generated/{filename}"
+            metadata_url = f"/media/generated/{meta_filename}"
+            file_path.with_suffix(".json").write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
+    else:
+        public_url = f"/media/generated/{filename}"
+        metadata_url = f"/media/generated/{meta_filename}"
+        file_path.with_suffix(".json").write_text(json.dumps(metadata_payload, indent=2), encoding="utf-8")
 
     logger.info(
         "⏱️ IMAGE←   | provider=%s | %dx%d | seed=%d | total=%.2fs",
@@ -1274,7 +1291,7 @@ async def generate_image_asset(
 
     return {
         "filename": filename,
-        "url": f"/media/generated/{filename}",
+        "url": public_url,
         "metadata_url": metadata_url,
         "prompt": prompt,
         "negative_prompt": negative_prompt,

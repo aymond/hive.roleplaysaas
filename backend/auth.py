@@ -34,15 +34,17 @@ def _ensure_firebase_app() -> None:
 async def get_current_user(
     authorization: str | None = Header(default=None),
     x_mock_role: str | None = Header(default=None),
+    x_mock_uid: str | None = Header(default=None),
 ) -> AuthenticatedUser:
     """
     Verifies GCP Identity Platform / Firebase ID tokens when SAAS_AUTH_ENABLED=true.
     In local self-hosted mode (SAAS_AUTH_ENABLED=false), defaults to local admin
-    unless `X-Mock-Role: user` is supplied for testing RBAC.
+    unless `X-Mock-Role: user` / `X-Mock-Uid` headers are supplied for testing RBAC & isolation.
     """
     if not SAAS_AUTH_ENABLED:
         role: Literal["user", "admin"] = "user" if x_mock_role == "user" else "admin"
-        return AuthenticatedUser(uid="local-owner", email="owner@localhost", role=role, plan="local")
+        uid = (x_mock_uid or "").strip() or "local-owner"
+        return AuthenticatedUser(uid=uid, email=f"{uid}@localhost", role=role, plan="local")
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer identity token")

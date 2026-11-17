@@ -20,6 +20,34 @@ from .models import (
 )
 
 
+from typing import Any, Callable
+
+
+class TenantWorkspace:
+    """Tenant-scoped workspace holding isolated characters, worlds, chats, workflows, and gallery."""
+
+    def __init__(
+        self,
+        uid: str,
+        characters: dict[str, CharacterCard],
+        worlds: dict[str, Lorebook],
+        chats: dict[str, ChatSession],
+        workflows: dict[str, WorkflowGraph],
+        gallery: list[GalleryAsset],
+        save_fn: Callable[[], None],
+    ) -> None:
+        self.uid = uid
+        self.characters = characters
+        self.worlds = worlds
+        self.chats = chats
+        self.workflows = workflows
+        self.gallery = gallery
+        self._save_fn = save_fn
+
+    def save(self) -> None:
+        self._save_fn()
+
+
 class StudioStorage:
     def __init__(self, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir or (Path(__file__).resolve().parent / "data")
@@ -36,8 +64,56 @@ class StudioStorage:
         self.chats: dict[str, ChatSession] = {}
         self.workflows: dict[str, WorkflowGraph] = {}
         self.gallery: list[GalleryAsset] = []
+        self._tenants: dict[str, TenantWorkspace] = {}
+        self._billing: dict[str, dict[str, Any]] = {}
 
         self.load_or_seed()
+
+    def for_user(self, uid: str = "local-owner") -> TenantWorkspace:
+        if uid == "local-owner" or not uid:
+            return TenantWorkspace(
+                uid="local-owner",
+                characters=self.characters,
+                worlds=self.worlds,
+                chats=self.chats,
+                workflows=self.workflows,
+                gallery=self.gallery,
+                save_fn=self.save,
+            )
+        if uid not in self._tenants:
+            self._tenants[uid] = TenantWorkspace(
+                uid=uid,
+                characters={},
+                worlds={},
+                chats={},
+                workflows={},
+                gallery=[],
+                save_fn=self.save,
+            )
+        return self._tenants[uid]
+
+    def get_user_billing(self, uid: str) -> dict[str, Any]:
+        if uid not in self._billing:
+            self._billing[uid] = {
+                "uid": uid,
+                "plan": "free",
+                "credit_balance": 50,
+                "stripe_customer_id": "",
+            }
+        return self._billing[uid]
+
+    def adjust_credits(self, uid: str, delta: int, reason: str, event_id: str | None = None) -> int:
+        acct = self.get_user_billing(uid)
+        seen_events = acct.setdefault("_events", set())
+        if event_id and event_id in seen_events:
+            return int(acct["credit_balance"])
+        new_bal = int(acct["credit_balance"]) + delta
+        if new_bal < 0:
+            raise ValueError(f"Insufficient credits (balance={acct['credit_balance']}, needed={abs(delta)})")
+        acct["credit_balance"] = new_bal
+        if event_id:
+            seen_events.add(event_id)
+        return new_bal
 
     def _ensure_seed_artwork(self, filename: str, prompt: str, seed: int) -> str:
         target = self.generated_dir / filename

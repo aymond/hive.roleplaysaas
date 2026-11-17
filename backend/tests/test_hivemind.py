@@ -1201,6 +1201,79 @@ def test_specialist_vs_unified_image_profiles() -> None:
     assert u_scenery["checkpoint"] == "BaseUnified.safetensors"
 
 
+def test_multi_tenant_isolation_and_rbac(monkeypatch) -> None:
+    import backend.main as main_mod
+
+    async def fake_generate_image_asset(**kwargs):
+        return {
+            "filename": "hm_tenant_a.png",
+            "url": "/api/media/hm_tenant_a.png",
+            "metadata_url": "/api/media/hm_tenant_a.json",
+            "prompt": kwargs.get("prompt", ""),
+            "negative_prompt": "",
+            "width": 512,
+            "height": 512,
+            "steps": 20,
+            "cfg": 6.0,
+            "seed": 42,
+            "provider": "mock",
+            "duration_ms": 10.0,
+        }
+
+    monkeypatch.setattr(main_mod, "generate_image_asset", fake_generate_image_asset)
+
+    try:
+        client = TestClient(app)
+        hdr_a = {"X-Mock-Uid": "tenant-a", "X-Mock-Role": "user"}
+        hdr_b = {"X-Mock-Uid": "tenant-b", "X-Mock-Role": "user"}
+
+        # 1. Tenant A creates a character, world, chat, and gallery asset
+        r_char = client.post(
+            "/api/characters",
+            json={"name": "Alice Secret", "description": "Private character"},
+            headers=hdr_a,
+        )
+        assert r_char.status_code == 200
+        char_a_id = r_char.json()["id"]
+
+        r_world = client.post(
+            "/api/worlds",
+            json={"name": "Alice World"},
+            headers=hdr_a,
+        )
+        assert r_world.status_code == 200
+        world_a_id = r_world.json()["id"]
+
+        r_chat = client.post(
+            "/api/chats",
+            json={"character_id": char_a_id, "world_id": world_a_id},
+            headers=hdr_a,
+        )
+        assert r_chat.status_code == 200
+        chat_a_id = r_chat.json()["id"]
+
+        # 2. Tenant B sees NONE of Tenant A's data and cannot access/delete it
+        assert client.get("/api/characters", headers=hdr_b).json() == []
+        assert client.get("/api/worlds", headers=hdr_b).json() == []
+        assert client.get("/api/chats", headers=hdr_b).json() == []
+        assert client.get("/api/gallery", headers=hdr_b).json() == []
+
+        assert client.delete(f"/api/characters/{char_a_id}", headers=hdr_b).status_code == 404
+        assert client.delete(f"/api/worlds/{world_a_id}", headers=hdr_b).status_code == 404
+        assert client.delete(f"/api/chats/{chat_a_id}", headers=hdr_b).status_code == 404
+        assert client.get("/api/media/hm_tenant_a.png", headers=hdr_b).status_code == 404
+
+        # 3. Non-admin user cannot mutate system config or view global metrics
+        assert client.get("/api/system/metrics", headers=hdr_b).status_code == 403
+        assert (
+            client.put("/api/system/config", json=main_mod.storage.config.model_dump(), headers=hdr_b).status_code
+            == 403
+        )
+    finally:
+        main_mod.storage._tenants.pop("tenant-a", None)
+        main_mod.storage._tenants.pop("tenant-b", None)
+
+
 
 
 

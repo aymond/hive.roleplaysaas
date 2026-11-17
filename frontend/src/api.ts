@@ -10,11 +10,14 @@ import type {
   WorkflowExecutionResult,
   WorkflowGraph,
 } from './types';
+import { getAuthToken } from './auth/firebase';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken();
   const res = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options?.headers || {}),
     },
     ...options,

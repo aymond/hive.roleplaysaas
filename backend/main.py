@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 import uuid
@@ -50,8 +51,9 @@ from .models import (
     WorkflowGraph,
     utc_now_iso,
 )
-from .auth import AuthenticatedUser, require_admin
+from .auth import SAAS_AUTH_ENABLED, AuthenticatedUser, get_current_user, require_admin
 from .billing import router as billing_router
+from .media_gcs import download_user_media, is_gcs_enabled
 from .moderation import enforce_moderation_or_422, scan_for_trigger_words
 from .storage import StudioStorage
 from .tavern_card import (
@@ -69,22 +71,66 @@ app = FastAPI(
 )
 app.include_router(billing_router)
 
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*").strip()
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
+    allow_credentials=_allowed_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-storage = StudioStorage()
+_use_firestore = os.getenv("STORAGE_BACKEND", "").lower() == "firestore" or (
+    bool(os.getenv("K_SERVICE")) and os.getenv("STORAGE_BACKEND", "").lower() != "local"
+)
+if _use_firestore:
+    from .storage_firestore import FirestoreStorage
+
+    storage: StudioStorage = FirestoreStorage()
+else:
+    storage = StudioStorage()
 set_hivemind_log_level(getattr(storage.config, "log_level", "INFO"))
 
-app.mount(
-    "/media/generated",
-    StaticFiles(directory=str(storage.generated_dir)),
-    name="generated_media",
-)
+if not SAAS_AUTH_ENABLED:
+    app.mount(
+        "/media/generated",
+        StaticFiles(directory=str(storage.generated_dir)),
+        name="generated_media",
+    )
+
+
+@app.get("/api/media/{filename}")
+async def get_authenticated_media(
+    filename: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Response:
+    safe_name = Path(filename).name
+    if not safe_name or safe_name != filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if is_gcs_enabled():
+        res = download_user_media(user.uid, safe_name)
+        if res:
+            content, media_type = res
+            return Response(content=content, media_type=media_type)
+        raise HTTPException(status_code=404, detail="Media object not found")
+
+    ws = storage.for_user(user.uid)
+    stem = safe_name.removesuffix(".json")
+    owns_asset = any(
+        safe_name in (a.url or "") or stem in (a.url or "")
+        for a in ws.gallery
+    ) or any(safe_name in (c.avatar_url or "") for c in ws.characters.values())
+    if user.uid != "local-owner" and not owns_asset:
+        raise HTTPException(status_code=404, detail="Media object not found")
+
+    local_path = storage.generated_dir / safe_name
+    if not local_path.exists():
+        raise HTTPException(status_code=404, detail="Media object not found")
+    media_type = "application/json" if safe_name.endswith(".json") else "image/png"
+    return Response(content=local_path.read_bytes(), media_type=media_type)
 
 
 class SendMessageRequest(BaseModel):
@@ -157,7 +203,7 @@ def _record_metric(kind: str, payload: dict[str, Any]) -> None:
 
 
 @app.get("/api/system/metrics")
-async def get_system_metrics() -> dict[str, Any]:
+async def get_system_metrics(admin: AuthenticatedUser = Depends(require_admin)) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     if _METRICS_PATH.exists():
         try:
@@ -235,7 +281,8 @@ class BackstoryImageRequest(BaseModel):
 
 
 @app.get("/api/system/status")
-async def get_system_status() -> dict[str, Any]:
+async def get_system_status(user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
     hw = get_apple_silicon_telemetry()
     ollama = await check_ollama_status(storage.config.ollama_base_url)
     openai_compat = await check_openai_compat_status(
@@ -252,17 +299,20 @@ async def get_system_status() -> dict[str, Any]:
         },
         "config": storage.config.model_dump(),
         "counts": {
-            "characters": len(storage.characters),
-            "worlds": len(storage.worlds),
-            "chats": len(storage.chats),
-            "workflows": len(storage.workflows),
-            "gallery": len(storage.gallery),
+            "characters": len(ws.characters),
+            "worlds": len(ws.worlds),
+            "chats": len(ws.chats),
+            "workflows": len(ws.workflows),
+            "gallery": len(ws.gallery),
         },
     }
 
 
 @app.put("/api/system/config")
-async def update_system_config(new_config: InferenceConfig) -> dict[str, Any]:
+async def update_system_config(
+    new_config: InferenceConfig,
+    admin: AuthenticatedUser = Depends(require_admin),
+) -> dict[str, Any]:
     storage.config = new_config
     set_hivemind_log_level(new_config.log_level)
     storage.save()
@@ -281,8 +331,9 @@ async def update_system_config(new_config: InferenceConfig) -> dict[str, Any]:
 
 
 @app.get("/api/characters")
-async def list_characters() -> list[CharacterCard]:
-    return list(storage.characters.values())
+async def list_characters(user: AuthenticatedUser = Depends(get_current_user)) -> list[CharacterCard]:
+    ws = storage.for_user(user.uid)
+    return list(ws.characters.values())
 
 
 def _moderate_character(card: CharacterCard) -> None:
@@ -347,8 +398,12 @@ async def test_admin_moderation_policy(
 
 
 @app.post("/api/characters")
-async def create_character(card: CharacterCard) -> CharacterCard:
+async def create_character(
+    card: CharacterCard,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> CharacterCard:
     _moderate_character(card)
+    ws = storage.for_user(user.uid)
     if not card.avatar_url:
         prompt = card.visual_prompt_tags or f"portrait of {card.name}, {card.title}, fantasy character concept art"
         img_meta = await generate_image_asset(
@@ -357,44 +412,59 @@ async def create_character(card: CharacterCard) -> CharacterCard:
             prompt=prompt,
             negative_prompt=card.negative_prompt_tags,
             pipeline_role="portrait",
+            uid=user.uid,
         )
         card.avatar_url = img_meta["url"]
     card.updated_at = utc_now_iso()
-    storage.characters[card.id] = card
-    storage.save()
+    ws.characters[card.id] = card
+    ws.save()
     return card
 
 
 @app.put("/api/characters/{char_id}")
-async def update_character(char_id: str, card: CharacterCard) -> CharacterCard:
+async def update_character(
+    char_id: str,
+    card: CharacterCard,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> CharacterCard:
     _moderate_character(card)
+    ws = storage.for_user(user.uid)
     card.id = char_id
     card.updated_at = utc_now_iso()
-    storage.characters[char_id] = card
-    storage.save()
+    ws.characters[char_id] = card
+    ws.save()
     return card
 
 
 @app.delete("/api/characters/{char_id}")
-async def delete_character(char_id: str) -> dict[str, str]:
-    if char_id not in storage.characters:
+async def delete_character(
+    char_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, str]:
+    ws = storage.for_user(user.uid)
+    if char_id not in ws.characters:
         raise HTTPException(status_code=404, detail="Character not found")
-    del storage.characters[char_id]
-    storage.save()
+    del ws.characters[char_id]
+    ws.save()
     return {"status": "deleted"}
 
 
 @app.post("/api/characters/{char_id}/generate-avatar")
-async def generate_character_avatar(char_id: str, seed: int | None = None) -> dict[str, Any]:
-    card = storage.characters.get(char_id)
+async def generate_character_avatar(
+    char_id: str,
+    seed: int | None = None,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    card = ws.characters.get(char_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
 
     logger.info("▶ ACTION   | generate_character_avatar(char=%r, id=%s)", card.name, char_id)
 
     world_style = ""
-    if card.world_id and card.world_id in storage.worlds:
-        world_style = storage.worlds[card.world_id].aesthetic_style
+    if card.world_id and card.world_id in ws.worlds:
+        world_style = ws.worlds[card.world_id].aesthetic_style
 
     base_tags = card.visual_prompt_tags or f"portrait of {card.name}, {card.title}, {card.personality}"
     portrait_parts = render_prompt_template(
@@ -414,6 +484,7 @@ async def generate_character_avatar(char_id: str, seed: int | None = None) -> di
         negative_prompt=card.negative_prompt_tags,
         seed=seed,
         pipeline_role="portrait",
+        uid=user.uid,
     )
     card.avatar_url = img_meta["url"]
     card.updated_at = utc_now_iso()
@@ -426,17 +497,22 @@ async def generate_character_avatar(char_id: str, seed: int | None = None) -> di
         width=img_meta["width"],
         height=img_meta["height"],
         seed=img_meta["seed"],
+        metadata_url=img_meta.get("metadata_url"),
         character_id=card.id,
         world_id=card.world_id,
     )
-    storage.gallery.insert(0, asset)
-    storage.save()
+    ws.gallery.insert(0, asset)
+    ws.save()
     return {"character": card.model_dump(), "asset": asset.model_dump()}
 
 
 @app.get("/api/characters/{char_id}/export-png")
-async def export_character_tavern_png(char_id: str) -> Response:
-    card = storage.characters.get(char_id)
+async def export_character_tavern_png(
+    char_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Response:
+    ws = storage.for_user(user.uid)
+    card = ws.characters.get(char_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
 
@@ -457,15 +533,23 @@ async def export_character_tavern_png(char_id: str) -> Response:
 
 
 @app.get("/api/characters/{char_id}/export-json")
-async def export_character_tavern_json(char_id: str) -> dict[str, Any]:
-    card = storage.characters.get(char_id)
+async def export_character_tavern_json(
+    char_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    card = ws.characters.get(char_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
     return character_to_tavern_v2_dict(card)
 
 
 @app.post("/api/characters/import")
-async def import_character_card(file: UploadFile = File(...)) -> CharacterCard:
+async def import_character_card(
+    file: UploadFile = File(...),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> CharacterCard:
+    ws = storage.for_user(user.uid)
     raw_bytes = await file.read()
     filename = (file.filename or "card.json").lower()
 
@@ -489,11 +573,12 @@ async def import_character_card(file: UploadFile = File(...)) -> CharacterCard:
             output_dir=storage.generated_dir,
             prompt=card.visual_prompt_tags or f"portrait of {card.name}, {card.title}",
             pipeline_role="portrait",
+            uid=user.uid,
         )
         card.avatar_url = img_meta["url"]
 
-    storage.characters[card.id] = card
-    storage.save()
+    ws.characters[card.id] = card
+    ws.save()
     return card
 
 
@@ -561,30 +646,40 @@ def _resolve_location_entry_id(
 
 
 @app.get("/api/worlds")
-async def list_worlds() -> list[Lorebook]:
-    return list(storage.worlds.values())
+async def list_worlds(user: AuthenticatedUser = Depends(get_current_user)) -> list[Lorebook]:
+    ws = storage.for_user(user.uid)
+    return list(ws.worlds.values())
 
 
 @app.post("/api/worlds")
-async def create_world(world: Lorebook) -> Lorebook:
+async def create_world(
+    world: Lorebook,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Lorebook:
     _moderate_world(world)
+    ws = storage.for_user(user.uid)
     world.updated_at = utc_now_iso()
     if world.map_image_url:
         _auto_place_map_locations(world)
-    storage.worlds[world.id] = world
-    storage.save()
+    ws.worlds[world.id] = world
+    ws.save()
     return world
 
 
 @app.put("/api/worlds/{world_id}")
-async def update_world(world_id: str, world: Lorebook) -> Lorebook:
+async def update_world(
+    world_id: str,
+    world: Lorebook,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> Lorebook:
     _moderate_world(world)
+    ws = storage.for_user(user.uid)
     world.id = world_id
     if world.map_image_url:
         _auto_place_map_locations(world)
     world.updated_at = utc_now_iso()
-    storage.worlds[world_id] = world
-    storage.save()
+    ws.worlds[world_id] = world
+    ws.save()
     return world
 
 
@@ -727,8 +822,10 @@ def _build_world_map_prompt(world: Lorebook, custom_prompt: str | None = None) -
 async def generate_world_map(
     world_id: str,
     req: MapGenerateRequest | None = None,
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    world = storage.worlds.get(world_id)
+    ws = storage.for_user(user.uid)
+    world = ws.worlds.get(world_id)
     if not world:
         raise HTTPException(status_code=404, detail="World not found")
 
@@ -750,6 +847,7 @@ async def generate_world_map(
         face_detailer_override=False,
         landscape_mode=True,
         pipeline_role="scenery",
+        uid=user.uid,
     )
     world.map_image_url = img_meta["url"]
     world.map_prompt = map_prompt
@@ -763,11 +861,12 @@ async def generate_world_map(
         width=img_meta["width"],
         height=img_meta["height"],
         seed=img_meta["seed"],
+        metadata_url=img_meta.get("metadata_url"),
         world_id=world.id,
         duration_ms=img_meta.get("duration_ms"),
     )
-    storage.gallery.insert(0, asset)
-    storage.save()
+    ws.gallery.insert(0, asset)
+    ws.save()
     return {"world": world.model_dump(), "asset": asset.model_dump()}
 
 
@@ -776,27 +875,41 @@ class PinLocationRequest(BaseModel):
 
 
 @app.post("/api/gallery/{asset_id}/pin-location")
-async def pin_gallery_asset_to_location(asset_id: str, req: PinLocationRequest) -> dict[str, Any]:
-    target = next((g for g in storage.gallery if g.id == asset_id), None)
+async def pin_gallery_asset_to_location(
+    asset_id: str,
+    req: PinLocationRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    target = next((g for g in ws.gallery if g.id == asset_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="Gallery asset not found")
     target.location_entry_id = req.location_entry_id
-    storage.save()
+    ws.save()
     return {"asset": target.model_dump()}
 
 
 @app.delete("/api/worlds/{world_id}")
-async def delete_world(world_id: str) -> dict[str, str]:
-    if world_id not in storage.worlds:
+async def delete_world(
+    world_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, str]:
+    ws = storage.for_user(user.uid)
+    if world_id not in ws.worlds:
         raise HTTPException(status_code=404, detail="World not found")
-    del storage.worlds[world_id]
-    storage.save()
+    del ws.worlds[world_id]
+    ws.save()
     return {"status": "deleted"}
 
 
 @app.post("/api/worlds/{world_id}/scan")
-async def test_lorebook_scanner(world_id: str, req: LoreScanRequest) -> dict[str, Any]:
-    world = storage.worlds.get(world_id)
+async def test_lorebook_scanner(
+    world_id: str,
+    req: LoreScanRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    world = ws.worlds.get(world_id)
     if not world:
         raise HTTPException(status_code=404, detail="World not found")
     res = scan_lorebook(
@@ -813,8 +926,13 @@ async def test_lorebook_scanner(world_id: str, req: LoreScanRequest) -> dict[str
 
 
 @app.post("/api/worlds/{world_id}/entries/{entry_id}/generate-image")
-async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str, Any]:
-    world = storage.worlds.get(world_id)
+async def generate_lore_entry_artwork(
+    world_id: str,
+    entry_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    world = ws.worlds.get(world_id)
     if not world:
         raise HTTPException(status_code=404, detail="World not found")
 
@@ -864,6 +982,7 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
         face_detailer_override=False if is_location else None,
         landscape_mode=is_location,
         pipeline_role="scenery" if is_location else "scene",
+        uid=user.uid,
     )
     target_entry.image_url = img_meta["url"]
     world.updated_at = utc_now_iso()
@@ -875,11 +994,12 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
         width=img_meta["width"],
         height=img_meta["height"],
         seed=img_meta["seed"],
+        metadata_url=img_meta.get("metadata_url"),
         world_id=world.id,
         location_entry_id=target_entry.id if target_entry.category == "location" else None,
     )
-    storage.gallery.insert(0, asset)
-    storage.save()
+    ws.gallery.insert(0, asset)
+    ws.save()
     return {"world": world.model_dump(), "entry": target_entry.model_dump(), "asset": asset.model_dump()}
 
 
@@ -887,18 +1007,23 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
 
 
 @app.get("/api/chats")
-async def list_chats() -> list[ChatSession]:
-    return list(storage.chats.values())
+async def list_chats(user: AuthenticatedUser = Depends(get_current_user)) -> list[ChatSession]:
+    ws = storage.for_user(user.uid)
+    return list(ws.chats.values())
 
 
 @app.post("/api/chats")
-async def create_chat_session(req: CreateChatRequest) -> ChatSession:
-    card = storage.characters.get(req.character_id)
+async def create_chat_session(
+    req: CreateChatRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ChatSession:
+    ws = storage.for_user(user.uid)
+    card = ws.characters.get(req.character_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
 
     world_id = req.world_id or card.world_id
-    world = storage.worlds.get(world_id) if world_id else None
+    world = ws.worlds.get(world_id) if world_id else None
 
     greeting = replace_tavern_macros(
         card.first_mes or f"*{card.name} regards you with quiet curiosity.* \"Greetings, {req.user_persona_name}.\"",
@@ -923,23 +1048,32 @@ async def create_chat_session(req: CreateChatRequest) -> ChatSession:
         user_persona_desc=req.user_persona_desc,
         messages=[first_msg],
     )
-    storage.chats[session.id] = session
-    storage.save()
+    ws.chats[session.id] = session
+    ws.save()
     return session
 
 
 @app.delete("/api/chats/{chat_id}")
-async def delete_chat_session(chat_id: str) -> dict[str, str]:
-    if chat_id not in storage.chats:
+async def delete_chat_session(
+    chat_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, str]:
+    ws = storage.for_user(user.uid)
+    if chat_id not in ws.chats:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    del storage.chats[chat_id]
-    storage.save()
+    del ws.chats[chat_id]
+    ws.save()
     return {"status": "deleted"}
 
 
 @app.delete("/api/chats/{chat_id}/messages/{msg_id}")
-async def delete_chat_message(chat_id: str, msg_id: str) -> dict[str, Any]:
-    session = storage.chats.get(chat_id)
+async def delete_chat_message(
+    chat_id: str,
+    msg_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    session = ws.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     before = len(session.messages)
@@ -947,20 +1081,25 @@ async def delete_chat_message(chat_id: str, msg_id: str) -> dict[str, Any]:
     if len(session.messages) == before:
         raise HTTPException(status_code=404, detail="Message not found")
     session.updated_at = utc_now_iso()
-    storage.save()
+    ws.save()
     return {"session": session.model_dump()}
 
 
 @app.post("/api/chats/{chat_id}/messages")
-async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, Any]:
-    session = storage.chats.get(chat_id)
+async def send_chat_message(
+    chat_id: str,
+    req: SendMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    session = ws.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
     if storage.config.sfw_mode:
         enforce_moderation_or_422([req.content], storage.moderation_policy, context_label="chat message")
 
-    card = storage.characters.get(session.character_id)
+    card = ws.characters.get(session.character_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
 
@@ -972,7 +1111,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         req.content[:90],
     )
 
-    world = storage.worlds.get(session.world_id) if session.world_id else None
+    world = ws.worlds.get(session.world_id) if session.world_id else None
 
     user_msg = ChatMessage(
         role="user",
@@ -998,7 +1137,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     if len(session.messages) >= 8 and (len(session.messages) - session.checkpoint_msg_count) >= 8:
         async def _bg_checkpoint() -> None:
             await _maybe_update_chat_checkpoint(session, card)
-            storage.save()
+            ws.save()
 
         asyncio.create_task(_bg_checkpoint())
 
@@ -1067,6 +1206,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
             prompt=image_prompt,
             negative_prompt=card.negative_prompt_tags,
             pipeline_role="scene",
+            uid=user.uid,
         )
         ill_render_ms = (time.perf_counter() - t_ill_render) * 1000
         illustrate_timings = {
@@ -1077,7 +1217,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         assistant_msg.image_prompt = image_prompt
         assistant_msg.image_seed = img_meta["seed"]
         assistant_msg.image_metadata_url = img_meta.get("metadata_url")
-        storage.gallery.insert(
+        ws.gallery.insert(
             0,
             GalleryAsset(
                 url=img_meta["url"],
@@ -1094,7 +1234,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
         )
 
     session.updated_at = utc_now_iso()
-    storage.save()
+    ws.save()
 
     timings: dict[str, Any] = {
         "lore_ms": round(lore_ms, 1),
@@ -1109,7 +1249,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
     _record_metric("chat", {"provider": provider_used, **timings})
 
     session.updated_at = utc_now_iso()
-    storage.save()
+    ws.save()
 
     return {
         "session": session.model_dump(),
@@ -1120,14 +1260,19 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
 
 
 @app.post("/api/chats/{chat_id}/messages/stream")
-async def stream_chat_message(chat_id: str, req: SendMessageRequest):
-    session = storage.chats.get(chat_id)
+async def stream_chat_message(
+    chat_id: str,
+    req: SendMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    ws = storage.for_user(user.uid)
+    session = ws.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    card = storage.characters.get(session.character_id)
+    card = ws.characters.get(session.character_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
-    world = storage.worlds.get(session.world_id) if session.world_id else None
+    world = ws.worlds.get(session.world_id) if session.world_id else None
     if storage.config.sfw_mode:
         enforce_moderation_or_422([req.content], storage.moderation_policy, context_label="chat message")
         _moderate_character(card)
@@ -1156,7 +1301,7 @@ async def stream_chat_message(chat_id: str, req: SendMessageRequest):
     if len(session.messages) >= 8 and (len(session.messages) - session.checkpoint_msg_count) >= 8:
         async def _bg_checkpoint() -> None:
             await _maybe_update_chat_checkpoint(session, card)
-            storage.save()
+            ws.save()
 
         asyncio.create_task(_bg_checkpoint())
 
@@ -1212,7 +1357,7 @@ async def stream_chat_message(chat_id: str, req: SendMessageRequest):
         assistant_msg.timings = timings
         _record_metric("chat", {"provider": provider_used, **timings})
         session.updated_at = utc_now_iso()
-        storage.save()
+        ws.save()
         logger.info(
             "⏱️ CHAT(SSE) | total=%.2fs (lore=%.0fms, reply=%.2fs, scene_state=%.2fs)",
             total_ms / 1000,
@@ -1226,8 +1371,14 @@ async def stream_chat_message(chat_id: str, req: SendMessageRequest):
 
 
 @app.post("/api/chats/{chat_id}/messages/{msg_id}/swipe")
-async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest) -> dict[str, Any]:
-    session = storage.chats.get(chat_id)
+async def swipe_chat_message(
+    chat_id: str,
+    msg_id: str,
+    req: SwipeMessageRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    session = ws.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
@@ -1235,7 +1386,7 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
     if not target_msg:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    card = storage.characters.get(session.character_id)
+    card = ws.characters.get(session.character_id)
     if not card:
         raise HTTPException(status_code=404, detail="Character not found")
 
@@ -1247,7 +1398,7 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
         req.direction,
     )
 
-    world = storage.worlds.get(session.world_id) if session.world_id else None
+    world = ws.worlds.get(session.world_id) if session.world_id else None
 
     if not target_msg.swipes:
         target_msg.swipes = [target_msg.content]
@@ -1255,13 +1406,13 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
     if req.direction == "prev" and target_msg.active_swipe > 0:
         target_msg.active_swipe -= 1
         target_msg.content = target_msg.swipes[target_msg.active_swipe]
-        storage.save()
+        ws.save()
         return {"session": session.model_dump()}
 
     if req.direction == "next" and target_msg.active_swipe < len(target_msg.swipes) - 1:
         target_msg.active_swipe += 1
         target_msg.content = target_msg.swipes[target_msg.active_swipe]
-        storage.save()
+        ws.save()
         return {"session": session.model_dump()}
 
     # Generate a new swipe variation
@@ -1300,7 +1451,7 @@ async def swipe_chat_message(chat_id: str, msg_id: str, req: SwipeMessageRequest
     )
 
     session.updated_at = utc_now_iso()
-    storage.save()
+    ws.save()
     return {"session": session.model_dump(), "provider": provider_used}
 
 
@@ -1309,8 +1460,10 @@ async def illustrate_chat_message(
     chat_id: str,
     msg_id: str,
     req: IllustrateMessageRequest | None = None,
+    user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    session = storage.chats.get(chat_id)
+    ws = storage.for_user(user.uid)
+    session = ws.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
 
@@ -1318,8 +1471,8 @@ async def illustrate_chat_message(
     if not target_msg:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    card = storage.characters.get(session.character_id)
-    world = storage.worlds.get(session.world_id) if session.world_id else None
+    card = ws.characters.get(session.character_id)
+    world = ws.worlds.get(session.world_id) if session.world_id else None
 
     custom_prompt = req.custom_prompt.strip() if (req and req.custom_prompt and req.custom_prompt.strip()) else None
     if storage.config.sfw_mode and custom_prompt:
@@ -1410,6 +1563,7 @@ async def illustrate_chat_message(
         prompt=full_prompt,
         negative_prompt=card.negative_prompt_tags if card else "blurry, low quality",
         pipeline_role="scene",
+        uid=user.uid,
     )
     render_ms = (time.perf_counter() - t0) * 1000
     total_ms = (time.perf_counter() - t_total0) * 1000
@@ -1455,8 +1609,8 @@ async def illustrate_chat_message(
         location_entry_id=matched_loc_id,
         duration_ms=img_meta.get("duration_ms"),
     )
-    storage.gallery.insert(0, asset)
-    storage.save()
+    ws.gallery.insert(0, asset)
+    ws.save()
     return {
         "session": session.model_dump(),
         "asset": asset.model_dump(),
@@ -1465,11 +1619,16 @@ async def illustrate_chat_message(
 
 
 @app.post("/api/chats/{chat_id}/checkpoint")
-async def update_chat_checkpoint(chat_id: str, req: CheckpointRequest) -> dict[str, Any]:
-    session = storage.chats.get(chat_id)
+async def update_chat_checkpoint(
+    chat_id: str,
+    req: CheckpointRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    session = ws.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
-    card = storage.characters.get(session.character_id)
+    card = ws.characters.get(session.character_id)
 
     if req.custom_checkpoint is not None:
         session.situation_checkpoint = req.custom_checkpoint.strip()
@@ -1478,18 +1637,23 @@ async def update_chat_checkpoint(chat_id: str, req: CheckpointRequest) -> dict[s
         await _maybe_update_chat_checkpoint(session, card, force=True)
 
     session.updated_at = utc_now_iso()
-    storage.save()
+    ws.save()
     return {"session": session.model_dump()}
 
 
 @app.post("/api/chats/{chat_id}/scene-state")
-async def update_chat_scene_state(chat_id: str, state: SceneState) -> dict[str, Any]:
-    session = storage.chats.get(chat_id)
+async def update_chat_scene_state(
+    chat_id: str,
+    state: SceneState,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
+    session = ws.chats.get(chat_id)
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     session.scene_state = state
     session.updated_at = utc_now_iso()
-    storage.save()
+    ws.save()
     return {"session": session.model_dump()}
 
 
@@ -1497,48 +1661,66 @@ async def update_chat_scene_state(chat_id: str, state: SceneState) -> dict[str, 
 
 
 @app.get("/api/workflows")
-async def list_workflows() -> list[WorkflowGraph]:
-    return list(storage.workflows.values())
+async def list_workflows(user: AuthenticatedUser = Depends(get_current_user)) -> list[WorkflowGraph]:
+    ws = storage.for_user(user.uid)
+    return list(ws.workflows.values())
 
 
 @app.post("/api/workflows")
-async def create_workflow(wf: WorkflowGraph) -> WorkflowGraph:
+async def create_workflow(
+    wf: WorkflowGraph,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> WorkflowGraph:
+    ws = storage.for_user(user.uid)
     wf.updated_at = utc_now_iso()
-    storage.workflows[wf.id] = wf
-    storage.save()
+    ws.workflows[wf.id] = wf
+    ws.save()
     return wf
 
 
 @app.put("/api/workflows/{wf_id}")
-async def update_workflow(wf_id: str, wf: WorkflowGraph) -> WorkflowGraph:
+async def update_workflow(
+    wf_id: str,
+    wf: WorkflowGraph,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> WorkflowGraph:
+    ws = storage.for_user(user.uid)
     wf.id = wf_id
     wf.updated_at = utc_now_iso()
-    storage.workflows[wf_id] = wf
-    storage.save()
+    ws.workflows[wf_id] = wf
+    ws.save()
     return wf
 
 
 @app.delete("/api/workflows/{wf_id}")
-async def delete_workflow(wf_id: str) -> dict[str, str]:
-    if wf_id not in storage.workflows:
+async def delete_workflow(
+    wf_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, str]:
+    ws = storage.for_user(user.uid)
+    if wf_id not in ws.workflows:
         raise HTTPException(status_code=404, detail="Workflow not found")
-    del storage.workflows[wf_id]
-    storage.save()
+    del ws.workflows[wf_id]
+    ws.save()
     return {"status": "deleted"}
 
 
 @app.post("/api/workflows/execute")
-async def execute_workflow(wf: WorkflowGraph) -> dict[str, Any]:
+async def execute_workflow(
+    wf: WorkflowGraph,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    ws = storage.for_user(user.uid)
     logger.info("▶ ACTION   | execute_workflow(name=%r, id=%s, nodes=%d)", wf.name, wf.id, len(wf.nodes))
     # Persist updated graph if it exists
     wf.updated_at = utc_now_iso()
-    storage.workflows[wf.id] = wf
+    ws.workflows[wf.id] = wf
 
     exec_result, new_assets = await execute_workflow_graph(
         workflow=wf,
         config=storage.config,
-        characters=storage.characters,
-        worlds=storage.worlds,
+        characters=ws.characters,
+        worlds=ws.worlds,
         output_dir=storage.generated_dir,
     )
 
@@ -1549,13 +1731,13 @@ async def execute_workflow(wf: WorkflowGraph) -> dict[str, Any]:
             node.data["image_url"] = trace.outputs["image_url"]
             node.data["last_caption"] = trace.outputs.get("caption") or trace.outputs.get("prompt", "")
             apply_char_id = trace.outputs.get("apply_to_character_id")
-            if apply_char_id and apply_char_id in storage.characters and node.data.get("auto_apply_avatar"):
-                storage.characters[apply_char_id].avatar_url = trace.outputs["image_url"]
+            if apply_char_id and apply_char_id in ws.characters and node.data.get("auto_apply_avatar"):
+                ws.characters[apply_char_id].avatar_url = trace.outputs["image_url"]
 
     for asset in reversed(new_assets):
-        storage.gallery.insert(0, asset)
+        ws.gallery.insert(0, asset)
 
-    storage.save()
+    ws.save()
     return {
         "execution": exec_result.model_dump(),
         "workflow": wf.model_dump(),
@@ -1567,12 +1749,19 @@ async def execute_workflow(wf: WorkflowGraph) -> dict[str, Any]:
 
 
 @app.get("/api/gallery")
-async def list_gallery() -> list[GalleryAsset]:
-    return storage.gallery
+async def list_gallery(user: AuthenticatedUser = Depends(get_current_user)) -> list[GalleryAsset]:
+    ws = storage.for_user(user.uid)
+    return ws.gallery
 
 
 @app.post("/api/gallery/generate")
-async def generate_direct_gallery_image(req: DirectImageRequest) -> GalleryAsset:
+async def generate_direct_gallery_image(
+    req: DirectImageRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> GalleryAsset:
+    if storage.config.sfw_mode:
+        enforce_moderation_or_422([req.prompt], storage.moderation_policy, context_label="gallery prompt")
+    ws = storage.for_user(user.uid)
     logger.info("▶ ACTION   | generate_direct_gallery_image(prompt=%r, %dx%d)", req.prompt[:90], req.width, req.height)
     img_meta = await generate_image_asset(
         config=storage.config,
@@ -1584,6 +1773,8 @@ async def generate_direct_gallery_image(req: DirectImageRequest) -> GalleryAsset
         steps=req.steps,
         cfg=req.cfg,
         seed=req.seed,
+        pipeline_role="workflow",
+        uid=user.uid,
     )
     asset = GalleryAsset(
         url=img_meta["url"],
@@ -1593,40 +1784,49 @@ async def generate_direct_gallery_image(req: DirectImageRequest) -> GalleryAsset
         width=img_meta["width"],
         height=img_meta["height"],
         seed=img_meta["seed"],
+        metadata_url=img_meta.get("metadata_url"),
         character_id=req.character_id,
         world_id=req.world_id,
     )
-    storage.gallery.insert(0, asset)
-    storage.save()
+    ws.gallery.insert(0, asset)
+    ws.save()
     return asset
 
 
 @app.delete("/api/gallery/{asset_id}")
-async def delete_gallery_asset(asset_id: str) -> dict[str, str]:
-    target_idx = next((i for i, a in enumerate(storage.gallery) if a.id == asset_id), None)
+async def delete_gallery_asset(
+    asset_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, str]:
+    ws = storage.for_user(user.uid)
+    target_idx = next((i for i, a in enumerate(ws.gallery) if a.id == asset_id), None)
     if target_idx is None:
         raise HTTPException(status_code=404, detail="Gallery asset not found")
-    storage.gallery.pop(target_idx)
-    storage.save()
+    ws.gallery.pop(target_idx)
+    ws.save()
     logger.info("▶ ACTION   | delete_gallery_asset(id=%s)", asset_id)
     return {"status": "deleted", "id": asset_id}
 
 
 @app.post("/api/backstory-image")
-async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[str, Any]:
+async def generate_backstory_grounded_image(
+    req: BackstoryImageRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
     """
     Generates a standalone image grounded in the roleplay's character persona,
     physical description, scenario backstory, and world lorebook without adding a chat turn.
     """
+    ws = storage.for_user(user.uid)
     t_studio_start = time.perf_counter()
-    session = storage.chats.get(req.chat_id) if req.chat_id else None
+    session = ws.chats.get(req.chat_id) if req.chat_id else None
     char_id = req.character_id or (session.character_id if session else None)
     world_id = req.world_id or (session.world_id if session else None)
 
-    card = storage.characters.get(char_id) if char_id else None
+    card = ws.characters.get(char_id) if char_id else None
     if not world_id and card and card.world_id:
         world_id = card.world_id
-    world = storage.worlds.get(world_id) if world_id else None
+    world = ws.worlds.get(world_id) if world_id else None
 
     is_pony = "pony" in (storage.config.comfyui_checkpoint or "").lower()
     active_mode = req.render_mode or getattr(storage.config, "comfyui_render_mode", "hybrid_refiner")
@@ -1719,8 +1919,8 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         harmonized_kw = ", ".join(p for p in (req.custom_prompt.strip(), style_suffix) if p)
 
     session_state_tags = ""
-    if req.chat_id and req.chat_id in storage.chats:
-        chat_sess = storage.chats[req.chat_id]
+    if req.chat_id and req.chat_id in ws.chats:
+        chat_sess = ws.chats[req.chat_id]
         session_state_tags = format_scene_state_tags(chat_sess.scene_state)
 
     scene_focus = f"{req.custom_prompt} {scenario_to_distill} {session_state_tags}"
@@ -1763,6 +1963,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         render_mode_override=active_mode,
         face_detailer_override=req.face_detailer,
         pipeline_role="scene",
+        uid=user.uid,
     )
     render_ms = (time.perf_counter() - t_render_start) * 1000
     total_ms = (time.perf_counter() - t_studio_start) * 1000
@@ -1799,8 +2000,8 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         location_entry_id=matched_loc_id,
         duration_ms=img_meta.get("duration_ms"),
     )
-    storage.gallery.insert(0, asset)
-    storage.save()
+    ws.gallery.insert(0, asset)
+    ws.save()
 
     return {
         "asset": asset.model_dump(),
