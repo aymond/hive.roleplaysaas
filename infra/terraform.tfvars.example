@@ -1,0 +1,6 @@
+project_id         = "your-gcp-project-id"
+region             = "europe-west4"
+container_image    = "europe-west4-docker.pkg.dev/your-gcp-project-id/hivemind-images/hivemind-api:latest"
+allowed_origins    = "https://your-saas-domain.com,https://your-gcp-project-id.web.app"
+image_provider     = "vertex_imagen"
+runpod_endpoint_id = ""
