@@ -1317,7 +1317,18 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
-                {characterBackstoryAssets.slice(0, visibleSnapshotCount).map((asset) => (
+                {characterBackstoryAssets.slice(0, visibleSnapshotCount).map((asset) => {
+                  const charName =
+                    characters.find((c) => c.id === asset.character_id)?.name ||
+                    activeCharacter?.name ||
+                    'Character';
+                  const assetWorld =
+                    worlds.find((w) => w.id === asset.world_id) || activeWorld || null;
+                  const locTitle = asset.location_entry_id
+                    ? assetWorld?.entries.find((e) => e.id === asset.location_entry_id)?.title || ''
+                    : '';
+                  const locationLabel = locTitle || assetWorld?.name || 'No Lore Location';
+                  return (
                   <div
                     key={asset.id}
                     className="group rounded-xl overflow-hidden bg-[#121622] border border-white/10 hover:border-cyan-400/50 transition flex flex-col justify-between"
@@ -1356,9 +1367,14 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                       </div>
                     </div>
                     <div className="p-2 flex items-center justify-between gap-1.5">
-                      <p className="text-[10px] text-slate-300 line-clamp-2 leading-snug flex-1">
-                        {asset.prompt}
-                      </p>
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="text-[11px] font-semibold text-white truncate">
+                          {charName}
+                        </div>
+                        <div className="text-[10px] text-emerald-300/90 truncate">
+                          {locationLabel}
+                        </div>
+                      </div>
                       <button
                         type="button"
                         onClick={() => handleDeleteSnapshot(asset.id)}
@@ -1370,7 +1386,8 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {visibleSnapshotCount < characterBackstoryAssets.length && (
