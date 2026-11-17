@@ -1,0 +1,22 @@
+steps:
+  - name: "node:22-slim"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - "npm --prefix frontend ci && npm --prefix frontend run build"
+
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/hivemind-images/hivemind-api:${SHORT_SHA}"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/hivemind-images/hivemind-api:latest"
+      - "."
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/hivemind-images/hivemind-api:${SHORT_SHA}"
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/hivemind-images/hivemind-api:latest"
+
+substitutions:
+  _REGION: europe-west4
