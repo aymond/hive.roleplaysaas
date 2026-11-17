@@ -1,8 +1,8 @@
 # Hivemind Studio — Apple Silicon Character, World & Node Workflow Engine
 
 **Hivemind** is a browser-based creative studio built for **Apple Silicon (`arm64` / Metal / PyTorch MPS)** that combines:
-1. **SillyTavern-Style Roleplay & Lorebooks**:
-   - **Character Forge**: Full `chara_card_v2` persona editor with one-click portrait synthesis and **TavernPNG (`.png`) / `.json` import & export**.
+1. **Character-Driven Roleplay & Lorebooks**:
+   - **Character Forge**: Full `chara_card_v2` persona editor with one-click portrait synthesis and **Card PNG (`.png`) / `.json` import & export**.
    - **World Codex**: Keyword-triggered World Info / Lorebooks across Locations, Factions, Magic/Tech, Artifacts, History, and Relationships, with a live **Lore Scanner Testbench**.
    - **Interactive Roleplay Chat**: Multi-turn roleplay with response swiping, live **Triggered World Info** badges, and one-click inline **Scene Illustration**.
 2. **ComfyUI-Style Visual Node Workflow Studio**:

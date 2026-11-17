@@ -126,7 +126,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
         <div className="p-3.5 border-b border-white/10 flex items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-white">Character Forge</h2>
-            <p className="text-[11px] text-slate-400">SillyTavern V2 Cards & Avatars</p>
+            <p className="text-[11px] text-slate-400">Character V2 Cards &amp; Avatars</p>
           </div>
           <div className="flex items-center gap-1.5">
             <input
@@ -141,7 +141,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}
               className="px-2.5 py-1.5 rounded-lg bg-[#171c2b] hover:bg-white/10 text-slate-200 border border-white/10 text-xs flex items-center gap-1 cursor-pointer"
-              title="Import SillyTavern V2 PNG or JSON Card"
+              title="Import Character Card V2 (PNG or JSON)"
             >
               <Upload className="w-3.5 h-3.5 text-amber-400" />
               {importing ? '...' : 'Import'}
@@ -233,10 +233,10 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
                   href={`/api/characters/${draft.id}/export-png`}
                   download
                   className="px-3 py-1.5 rounded-xl bg-[#161b29] hover:bg-white/10 border border-white/15 text-slate-200 text-xs font-medium flex items-center gap-1.5"
-                  title="Download PNG with embedded SillyTavern V2 base64 metadata"
+                  title="Download PNG with embedded Character Card V2 metadata"
                 >
                   <Download className="w-3.5 h-3.5 text-amber-400" />
-                  Export TavernPNG
+                  Export Card PNG
                 </a>
 
                 <a
@@ -388,7 +388,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
               </div>
             </div>
 
-            {/* Core SillyTavern Persona Fields */}
+            {/* Core Character Persona Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-[#111520] p-4 rounded-2xl border border-white/10 space-y-2">
                 <label className="block text-xs font-semibold text-slate-300">
@@ -438,7 +438,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
 
             <details className="bg-[#111520] p-4 rounded-2xl border border-white/10">
               <summary className="text-xs font-semibold text-slate-300 cursor-pointer">
-                Advanced Tavern V2 Fields (Example Dialogue & System Prompt Override)
+                Advanced Character V2 Fields (Example Dialogue &amp; System Prompt Override)
               </summary>
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>

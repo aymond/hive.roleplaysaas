@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT_DIR"
 
 echo "=========================================================="
-echo "  HIVEMIND STUDIO — Apple Silicon Tavern x ComfyUI MVP"
+echo "  HIVEMIND STUDIO — Cloud & Local Roleplay Studio"
 echo "=========================================================="
 
 # Start FastAPI backend on port 8765 (auto-reloads on .py edits without restarting on JSON data saves)

@@ -494,7 +494,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
         </div>
       </aside>
 
-      {/* Center Column: Interactive Tavern Chat Stream */}
+      {/* Center Column: Interactive Roleplay Chat Stream */}
       <section
         className={`col-span-9 ${
           rightPanelOpen ? 'lg:col-span-6' : 'lg:col-span-10'

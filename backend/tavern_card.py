@@ -10,7 +10,7 @@ from .models import CharacterCard, utc_now_iso
 
 
 def character_to_tavern_v2_dict(card: CharacterCard) -> dict[str, Any]:
-    """Convert an internal CharacterCard into SillyTavern V2 Specification dict."""
+    """Convert an internal CharacterCard into Character Card V2 Specification dict."""
     data = {
         "name": card.name,
         "description": card.description,
@@ -74,7 +74,7 @@ def tavern_dict_to_character(payload: dict[str, Any], avatar_url: str = "") -> C
 
 
 def encode_tavern_png(card: CharacterCard, base_image_bytes: bytes | None = None) -> bytes:
-    """Embed SillyTavern V2 JSON metadata into a PNG 'chara' tEXt chunk."""
+    """Embed Character Card V2 JSON metadata into a PNG 'chara' tEXt chunk."""
     if base_image_bytes:
         img = Image.open(io.BytesIO(base_image_bytes)).convert("RGBA")
     else:
@@ -93,13 +93,13 @@ def encode_tavern_png(card: CharacterCard, base_image_bytes: bytes | None = None
 
 
 def decode_tavern_png(png_bytes: bytes, avatar_url: str = "") -> CharacterCard:
-    """Extract SillyTavern V1/V2 metadata from a PNG 'chara' or 'ccv3' tEXt chunk."""
+    """Extract Character Card V1/V2 metadata from a PNG 'chara' or 'ccv3' tEXt chunk."""
     img = Image.open(io.BytesIO(png_bytes))
     info = img.info or {}
 
     raw_b64 = info.get("chara") or info.get("ccv3")
     if not raw_b64:
-        raise ValueError("PNG file does not contain a 'chara' SillyTavern metadata chunk.")
+        raise ValueError("PNG file does not contain a 'chara' Character Card metadata chunk.")
 
     decoded_bytes = base64.b64decode(raw_b64)
     payload = json.loads(decoded_bytes.decode("utf-8"))

@@ -357,7 +357,7 @@ class StudioStorage:
             id="wf_char_portrait_forge",
             name="Character Concept & Portrait Forge",
             description=(
-                "Chained pipeline: Loads a SillyTavern Character Card + World Lorebook context, fuses them into a "
+                "Chained pipeline: Loads a Character Card V2 + World Lorebook context, fuses them into a "
                 "cinematic prompt, expands visual details with the LLM Director, and renders on Apple Silicon."
             ),
             category="Character & Avatar",

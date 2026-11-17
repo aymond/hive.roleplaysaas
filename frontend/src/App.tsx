@@ -95,7 +95,7 @@ export const App: React.FC = () => {
   const navItems: { id: StudioTab; label: string; badge?: number; icon: React.ReactNode }[] = [
     {
       id: 'chat',
-      label: 'Tavern Roleplay',
+      label: 'Roleplay Chat',
       badge: chats.length,
       icon: <MessageSquare className="w-4 h-4" />,
     },
@@ -131,7 +131,7 @@ export const App: React.FC = () => {
             <div>
               <span className="font-extrabold tracking-tight text-sm text-white">HIVEMIND</span>
               <span className="hidden sm:inline-block ml-2 text-[11px] text-slate-400">
-                Tavern × ComfyUI Studio
+                Hivemind Cloud Roleplay Studio
               </span>
             </div>
           </div>
