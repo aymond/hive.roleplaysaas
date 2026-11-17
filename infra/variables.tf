@@ -26,10 +26,28 @@ variable "allowed_origins" {
   default     = "https://hivemind-saas.web.app"
 }
 
+variable "llm_provider" {
+  description = "Default SFW LLM backend (vertex_ai or openai_compat for self-hosted Cloud Run vLLM)"
+  type        = string
+  default     = "vertex_ai"
+}
+
 variable "image_provider" {
-  description = "Default SFW image backend (vertex_imagen or runpod_serverless)"
+  description = "Default SFW image backend (vertex_imagen or comfyui for self-hosted Cloud Run GPU)"
   type        = string
   default     = "vertex_imagen"
+}
+
+variable "enable_cloud_run_comfyui_gpu" {
+  description = "Deploy a self-hosted ComfyUI service on Cloud Run with NVIDIA L4 GPU (scales to zero)"
+  type        = bool
+  default     = false
+}
+
+variable "comfyui_gpu_image" {
+  description = "Container image URI for self-hosted ComfyUI on Cloud Run GPU"
+  type        = string
+  default     = ""
 }
 
 variable "runpod_endpoint_id" {

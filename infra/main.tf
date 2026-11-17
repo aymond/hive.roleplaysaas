@@ -134,7 +134,42 @@ resource "google_secret_manager_secret_iam_member" "secret_access" {
   member    = "serviceAccount:${google_service_account.api_sa.email}"
 }
 
-# 7. Scale-to-zero Cloud Run v2 API Service
+# 7. Optional self-hosted ComfyUI on Cloud Run GPU (NVIDIA L4, scale-to-zero)
+resource "google_cloud_run_v2_service" "comfyui_gpu" {
+  count    = var.enable_cloud_run_comfyui_gpu ? 1 : 0
+  name     = "${var.service_name}-comfyui-gpu"
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+
+  template {
+    service_account = google_service_account.api_sa.email
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 3
+    }
+
+    node_selector {
+      accelerator = "nvidia-l4"
+    }
+
+    containers {
+      image = var.comfyui_gpu_image
+
+      resources {
+        limits = {
+          cpu              = "4"
+          memory           = "16Gi"
+          "nvidia.com/gpu" = "1"
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+# 8. Scale-to-zero Cloud Run v2 API Service
 resource "google_cloud_run_v2_service" "api" {
   name     = var.service_name
   location = var.region
@@ -180,8 +215,16 @@ resource "google_cloud_run_v2_service" "api" {
         value = var.allowed_origins
       }
       env {
+        name  = "LLM_PROVIDER"
+        value = var.llm_provider
+      }
+      env {
         name  = "IMAGE_PROVIDER"
         value = var.image_provider
+      }
+      env {
+        name  = "COMFYUI_BASE_URL"
+        value = var.enable_cloud_run_comfyui_gpu ? google_cloud_run_v2_service.comfyui_gpu[0].uri : "http://127.0.0.1:8188"
       }
       env {
         name  = "RUNPOD_ENDPOINT_ID"

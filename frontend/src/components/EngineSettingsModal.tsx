@@ -114,7 +114,7 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
               Apple Silicon Inference & Connector Settings
             </h2>
             <p className="text-xs text-slate-400">
-              Configure local Metal / PyTorch MPS, Ollama, LM Studio, and ComfyUI bridges
+              Configure Vertex AI, Cloud Run GPU / ComfyUI, OpenAI-compatible (vLLM / Ollama), and SFW guardrails
             </p>
           </div>
         </div>
@@ -140,9 +140,15 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
               </span>
             </div>
             <div className="text-slate-300 font-mono text-[11px]">
-              PyTorch {status.hardware.torch_version} • Metal MPS:{' '}
+              PyTorch {status.hardware.torch_version} •{' '}
               <strong className="text-emerald-300">
-                {status.hardware.mps_available ? 'ACTIVE' : 'UNAVAILABLE'}
+                {status.hardware.cuda_available
+                  ? `CUDA (${status.hardware.cuda_device || 'GPU'})`
+                  : status.hardware.mps_available
+                  ? 'Metal MPS ACTIVE'
+                  : status.hardware.cloud_run
+                  ? 'GCP Cloud Run'
+                  : 'CPU'}
               </strong>
             </div>
           </div>
@@ -167,9 +173,10 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
                   }
                   className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-xs text-white"
                 >
-                  <option value="auto">Auto (Ollama → OpenAI-Compat → Built-in Synth)</option>
-                  <option value="ollama">Ollama Local Metal API (localhost:11434)</option>
-                  <option value="openai_compat">OpenAI-Compatible (LM Studio / mlx_lm)</option>
+                  <option value="auto">Auto (Vertex AI → Ollama → OpenAI-Compat → Built-in Synth)</option>
+                  <option value="vertex_ai">Google Cloud Vertex AI (Gemini)</option>
+                  <option value="ollama">Ollama API (Self-Hosted / Cloud Run)</option>
+                  <option value="openai_compat">OpenAI-Compatible (vLLM / Cloud Run / LM Studio)</option>
                   <option value="builtin_synth">Built-in Instant Story Engine</option>
                 </select>
               </div>

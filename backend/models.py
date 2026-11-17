@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
@@ -183,13 +184,20 @@ class WorkflowExecutionResult(BaseModel):
 class InferenceConfig(BaseModel):
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     sfw_mode: bool = True
-    llm_provider: Literal["auto", "ollama", "openai_compat", "builtin_synth"] = "auto"
+    llm_provider: Literal["auto", "vertex_ai", "ollama", "openai_compat", "builtin_synth"] = Field(
+        default_factory=lambda: os.getenv("LLM_PROVIDER", "auto")  # type: ignore[return-value]
+    )
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:14b"
     prompt_refiner_model: str = "llama3.2:latest"
-    openai_base_url: str = "http://127.0.0.1:1234/v1"
+    openai_base_url: str = Field(
+        default_factory=lambda: os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:1234/v1")
+    )
     openai_api_key: str = "lm-studio"
     openai_model: str = "local-model"
+    vertex_gemini_model: str = Field(
+        default_factory=lambda: os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
+    )
     temperature: float = 0.75
     max_tokens: int = 512
 
@@ -200,16 +208,20 @@ class InferenceConfig(BaseModel):
         "vertex_imagen",
         "runpod_serverless",
         "procedural_art",
-    ] = "auto"
-    vertex_project_id: str = ""
-    vertex_location: str = "europe-west4"
-    vertex_imagen_model: str = "imagen-3.0-generate-002"
-    runpod_endpoint_id: str = ""
-    runpod_api_key: str = ""
+    ] = Field(default_factory=lambda: os.getenv("IMAGE_PROVIDER", "auto"))  # type: ignore[arg-type]
+    vertex_project_id: str = Field(default_factory=lambda: os.getenv("GCP_PROJECT_ID", ""))
+    vertex_location: str = Field(default_factory=lambda: os.getenv("GCP_REGION", "europe-west4"))
+    vertex_imagen_model: str = Field(
+        default_factory=lambda: os.getenv("VERTEX_IMAGEN_MODEL", "imagen-3.0-generate-002")
+    )
+    runpod_endpoint_id: str = Field(default_factory=lambda: os.getenv("RUNPOD_ENDPOINT_ID", ""))
+    runpod_api_key: str = Field(default_factory=lambda: os.getenv("RUNPOD_API_KEY", ""))
     mps_model_id: str = "segmind/tiny-sd"
     mps_use_fp16: bool = True
     mps_attention_slicing: bool = True
-    comfyui_base_url: str = "http://127.0.0.1:8188"
+    comfyui_base_url: str = Field(
+        default_factory=lambda: os.getenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    )
     comfyui_checkpoint: str = "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors"
     comfyui_render_mode: Literal[
         "hybrid_refiner",

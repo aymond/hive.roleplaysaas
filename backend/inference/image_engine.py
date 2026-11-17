@@ -21,13 +21,21 @@ from ..models import InferenceConfig
 from .llm_engine import build_anatomical_and_clothing_overrides, build_face_detailer_prompt, is_dynamic_action_scene
 
 try:
+    import os
     import torch
+
     TORCH_AVAILABLE = True
     MPS_AVAILABLE = bool(hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    CUDA_AVAILABLE = bool(torch.cuda.is_available())
+    CUDA_DEVICE = torch.cuda.get_device_name(0) if CUDA_AVAILABLE else ""
     TORCH_VERSION = torch.__version__
 except Exception:
+    import os
+
     TORCH_AVAILABLE = False
     MPS_AVAILABLE = False
+    CUDA_AVAILABLE = False
+    CUDA_DEVICE = ""
     TORCH_VERSION = "unavailable"
 
 
@@ -35,23 +43,29 @@ _MPS_PIPELINE_CACHE: dict[str, Any] = {}
 
 
 def get_apple_silicon_telemetry() -> dict[str, Any]:
+    is_apple = platform.system() == "Darwin" and platform.machine() == "arm64"
     return {
         "architecture": platform.machine(),
         "system": platform.system(),
-        "processor": platform.processor() or "Apple Silicon arm64",
-        "is_apple_silicon": platform.system() == "Darwin" and platform.machine() == "arm64",
+        "processor": platform.processor() or ("Apple Silicon arm64" if is_apple else platform.machine()),
+        "is_apple_silicon": is_apple,
+        "cloud_run": bool(os.getenv("K_SERVICE")),
         "torch_available": TORCH_AVAILABLE,
         "torch_version": TORCH_VERSION,
         "mps_available": MPS_AVAILABLE,
+        "cuda_available": CUDA_AVAILABLE,
+        "cuda_device": CUDA_DEVICE,
         "mps_loaded_models": list(_MPS_PIPELINE_CACHE.keys()),
     }
 
 
 async def check_comfyui_status(base_url: str) -> dict[str, Any]:
-    candidates = [base_url.rstrip("/")]
-    for fallback in ("http://127.0.0.1:8188", "http://127.0.0.1:8000"):
-        if fallback not in candidates:
-            candidates.append(fallback)
+    clean_base = base_url.rstrip("/")
+    candidates = [clean_base]
+    if "127.0.0.1" in clean_base or "localhost" in clean_base:
+        for fallback in ("http://127.0.0.1:8188", "http://127.0.0.1:8000"):
+            if fallback not in candidates:
+                candidates.append(fallback)
 
     async with httpx.AsyncClient(timeout=5.0) as client:
         for url in candidates:

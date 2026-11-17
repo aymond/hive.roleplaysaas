@@ -171,13 +171,14 @@ export interface WorkflowExecutionResult {
 
 export interface InferenceConfig {
   log_level?: 'INFO' | 'DEBUG';
-  llm_provider: 'auto' | 'ollama' | 'openai_compat' | 'builtin_synth';
+  llm_provider: 'auto' | 'vertex_ai' | 'ollama' | 'openai_compat' | 'builtin_synth';
   sfw_mode?: boolean;
   ollama_base_url: string;
   ollama_model: string;
   openai_base_url: string;
   openai_api_key: string;
   openai_model: string;
+  vertex_gemini_model?: string;
   temperature: number;
   max_tokens: number;
 
@@ -234,9 +235,12 @@ export interface SystemStatus {
     system: string;
     processor: string;
     is_apple_silicon: boolean;
+    cloud_run?: boolean;
     torch_available: boolean;
     torch_version: string;
     mps_available: boolean;
+    cuda_available?: boolean;
+    cuda_device?: string;
     mps_loaded_models: string[];
   };
   providers: {

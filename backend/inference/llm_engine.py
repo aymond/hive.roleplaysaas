@@ -251,6 +251,72 @@ def _synthesize_roleplay_reply(
         )
 
 
+async def _call_vertex_gemini_chat(
+    config: InferenceConfig,
+    messages: list[dict[str, str]],
+    purpose: str = "chat",
+    temperature_override: float | None = None,
+    num_predict_override: int | None = None,
+) -> str | None:
+    """Calls Google Cloud Vertex AI Gemini REST endpoint via Application Default Credentials."""
+    project_id = (getattr(config, "vertex_project_id", "") or os.getenv("GCP_PROJECT_ID", "")).strip()
+    location = (getattr(config, "vertex_location", "europe-west4") or os.getenv("GCP_REGION", "europe-west4")).strip()
+    model_id = (getattr(config, "vertex_gemini_model", "gemini-2.5-flash") or "gemini-2.5-flash").strip()
+    if not project_id:
+        return None
+    try:
+        import google.auth
+        import google.auth.transport.requests
+
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds.refresh(google.auth.transport.requests.Request())
+
+        system_parts = [m["content"] for m in messages if m.get("role") == "system" and m.get("content")]
+        contents = [
+            {
+                "role": "model" if m.get("role") == "assistant" else "user",
+                "parts": [{"text": m.get("content", "")}],
+            }
+            for m in messages
+            if m.get("role") != "system" and m.get("content")
+        ]
+        temp = temperature_override if temperature_override is not None else config.temperature
+        max_out = num_predict_override if num_predict_override is not None else config.max_tokens
+        payload: dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temp,
+                "maxOutputTokens": max_out,
+                "topP": 0.92,
+            },
+        }
+        if system_parts:
+            payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+
+        url = (
+            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}"
+            f"/locations/{location}/publishers/google/models/{model_id}:generateContent"
+        )
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {creds.token}"},
+                json=payload,
+            )
+            if resp.status_code == 200:
+                cands = resp.json().get("candidates", [])
+                if cands:
+                    parts = cands[0].get("content", {}).get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts).strip()
+                    if text:
+                        logger.info("🤖 VERTEX←  | purpose=%s | model=%s | chars=%d", purpose, model_id, len(text))
+                        return text
+            logger.warning("⚠️ VERTEX   | purpose=%s status=%d body=%s", purpose, resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.warning("⚠️ VERTEX   | purpose=%s error=%s", purpose, exc)
+    return None
+
+
 async def generate_roleplay_reply(
     config: InferenceConfig,
     character: CharacterCard,
@@ -324,6 +390,16 @@ async def generate_roleplay_reply(
                     res = retry_res
         if res:
             return res, f"ollama ({config.ollama_model})"
+
+    if config.llm_provider in ("vertex_ai", "auto"):
+        res = await _call_vertex_gemini_chat(
+            config,
+            messages,
+            purpose=f"roleplay_reply({character.name})",
+            num_predict_override=min(int(config.max_tokens or 280), 280),
+        )
+        if res:
+            return res, f"vertex_ai ({getattr(config, 'vertex_gemini_model', 'gemini-2.5-flash')})"
 
     if config.llm_provider in ("auto", "openai_compat"):
         res = await _call_openai_compat_chat(config, messages)
@@ -446,6 +522,16 @@ async def generate_node_text(
         res = await _call_ollama_chat(config, messages, purpose=f"workflow_node({mode})")
         if res:
             return res, f"ollama ({config.ollama_model})"
+
+    if config.llm_provider in ("vertex_ai", "auto"):
+        res = await _call_vertex_gemini_chat(
+            config,
+            messages,
+            purpose=f"roleplay_reply({character.name})",
+            num_predict_override=min(int(config.max_tokens or 280), 280),
+        )
+        if res:
+            return res, f"vertex_ai ({getattr(config, 'vertex_gemini_model', 'gemini-2.5-flash')})"
 
     if config.llm_provider in ("auto", "openai_compat"):
         res = await _call_openai_compat_chat(config, messages)

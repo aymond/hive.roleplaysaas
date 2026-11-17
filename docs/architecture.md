@@ -25,10 +25,11 @@ flowchart TB
         SM["GCP Secret Manager (Stripe & RunPod Keys)"]
     end
 
-    subgraph AI["Configurable SFW AI Backends"]
-        LLM["SFW LLM (Vertex Gemini Flash / OpenAI-compat)"]
-        ImgV["Vertex AI Imagen (Managed SFW)"]
-        ImgR["RunPod Serverless ComfyUI (Juggernaut-XL / RealVisXL)"]
+    subgraph AI["Configurable GCP-Native SFW AI Backends"]
+        LLM_V["Vertex AI Gemini Flash (Managed LLM)"]
+        LLM_CR["Cloud Run GPU: vLLM / Ollama (Self-Hosted LLM)"]
+        Img_V["Vertex AI Imagen (Managed SFW)"]
+        Img_CR["Cloud Run GPU (L4): ComfyUI Juggernaut-XL (Self-Hosted)"]
     end
 
     Stripe["Stripe Checkout & Portal"]
@@ -42,9 +43,10 @@ flowchart TB
     CR -->|"Tenant Data & Moderation Policy"| FS
     CR -->|"Private PNG + JSON Metadata"| GCS
     CR -->|"Runtime Secrets"| SM
-    CR -->|"Roleplay & Prompt Synthesis"| LLM
-    CR -->|"image_provider = vertex_imagen"| ImgV
-    CR -->|"image_provider = runpod_serverless"| ImgR
+    CR -->|"llm_provider = vertex_ai"| LLM_V
+    CR -->|"llm_provider = openai_compat / ollama"| LLM_CR
+    CR -->|"image_provider = vertex_imagen"| Img_V
+    CR -->|"image_provider = comfyui"| Img_CR
     Browser -->|"Checkout / Portal"| Stripe
     Stripe -->|"Signed Webhook"| Bill
     Bill --> CR

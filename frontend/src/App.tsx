@@ -174,8 +174,17 @@ export const App: React.FC = () => {
             <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300">
               <Cpu className="w-3.5 h-3.5 text-emerald-400" />
               <span>
-                Apple Silicon {status.hardware.architecture} •{' '}
-                {status.hardware.mps_available ? 'Metal MPS Ready' : 'CPU'}
+                {status.hardware.cloud_run
+                  ? 'GCP Cloud Run'
+                  : status.hardware.is_apple_silicon
+                  ? `Apple Silicon ${status.hardware.architecture}`
+                  : `${status.hardware.system} ${status.hardware.architecture}`}{' '}
+                •{' '}
+                {status.hardware.cuda_available
+                  ? 'CUDA GPU Ready'
+                  : status.hardware.mps_available
+                  ? 'Metal MPS Ready'
+                  : 'Cloud / CPU'}
               </span>
             </div>
           )}
