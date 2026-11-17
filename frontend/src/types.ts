@@ -169,6 +169,23 @@ export interface WorkflowExecutionResult {
   final_text: string;
 }
 
+export interface ImagePipelineProfile {
+  provider:
+    | 'inherit'
+    | 'auto'
+    | 'mps_diffusers'
+    | 'comfyui'
+    | 'vertex_imagen'
+    | 'runpod_serverless'
+    | 'procedural_art';
+  checkpoint: string;
+  vertex_model: string;
+  render_mode: string;
+  face_detailer: boolean | null;
+  steps: number | null;
+  cfg: number | null;
+}
+
 export interface InferenceConfig {
   log_level?: 'INFO' | 'DEBUG';
   llm_provider: 'auto' | 'vertex_ai' | 'ollama' | 'openai_compat' | 'builtin_synth';
@@ -213,6 +230,11 @@ export interface InferenceConfig {
   default_height: number;
   default_steps: number;
   default_cfg: number;
+  use_specialist_image_models?: boolean;
+  portrait_profile?: ImagePipelineProfile;
+  scene_profile?: ImagePipelineProfile;
+  scenery_profile?: ImagePipelineProfile;
+  workflow_profile?: ImagePipelineProfile;
   scene_prompt_template?: string;
   studio_prompt_template?: string;
   portrait_prompt_template?: string;

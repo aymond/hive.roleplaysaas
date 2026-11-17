@@ -250,6 +250,7 @@ async def execute_workflow_graph(
                     steps=steps,
                     cfg=cfg,
                     seed=seed,
+                    pipeline_role="workflow",
                 )
                 generated_images.append(img_meta["url"])
                 out = {

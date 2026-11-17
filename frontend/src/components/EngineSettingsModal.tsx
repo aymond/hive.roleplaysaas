@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Cpu, Check, X, Server } from 'lucide-react';
 import { api } from '../api';
-import type { InferenceConfig, SystemStatus } from '../types';
+import type { ImagePipelineProfile, InferenceConfig, SystemStatus } from '../types';
 
 interface EngineSettingsModalProps {
   isOpen: boolean;
@@ -21,6 +21,9 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
     status?.config || null
   );
   const [saving, setSaving] = useState(false);
+  const [activeProfileTab, setActiveProfileTab] = useState<
+    'portrait_profile' | 'scene_profile' | 'scenery_profile' | 'workflow_profile'
+  >('portrait_profile');
   const [metrics, setMetrics] = useState<{
     chat: { count: number; avg_ms: number | null; p50_ms: number | null; latest_ms: number | null };
     scene: { count: number; avg_ms: number | null; p50_ms: number | null; latest_ms: number | null };
@@ -320,6 +323,19 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
                   />
                   Enforce SFW Mode (Pre-flight trigger-word filter + SFW negative blockers)
                 </label>
+                <label className="mt-1.5 flex items-center gap-1.5 text-xs text-cyan-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draftConfig.use_specialist_image_models ?? true}
+                    onChange={(e) =>
+                      setDraftConfig({
+                        ...draftConfig,
+                        use_specialist_image_models: e.target.checked,
+                      })
+                    }
+                  />
+                  Use Specialist Models per Pipeline (uncheck for one model for all)
+                </label>
               </div>
               <div>
                 <label className="block text-xs text-slate-300 mb-1">
@@ -533,6 +549,167 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Specialist Per-Pipeline Image Profiles (Portraits, Scenes, Scenery, Comfy Nodes) */}
+            {(draftConfig.use_specialist_image_models ?? true) && (() => {
+              const emptyProfile: ImagePipelineProfile = {
+                provider: 'inherit',
+                checkpoint: '',
+                vertex_model: '',
+                render_mode: 'inherit',
+                face_detailer: null,
+                steps: null,
+                cfg: null,
+              };
+              const currentProfile: ImagePipelineProfile = {
+                ...emptyProfile,
+                ...(draftConfig[activeProfileTab] || {}),
+              };
+              const updateProfile = (patch: Partial<ImagePipelineProfile>) => {
+                setDraftConfig({
+                  ...draftConfig,
+                  [activeProfileTab]: { ...currentProfile, ...patch },
+                });
+              };
+              return (
+                <div className="p-3.5 rounded-xl bg-[#121724] border border-cyan-500/25 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-cyan-300">
+                      Specialist Pipeline Profiles
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {(
+                        [
+                          ['portrait_profile', 'Portraits'],
+                          ['scene_profile', 'Scenes'],
+                          ['scenery_profile', 'Scenery & Maps'],
+                          ['workflow_profile', 'Comfy Nodes'],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setActiveProfileTab(key)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition ${
+                            activeProfileTab === key
+                              ? 'bg-cyan-500 text-slate-950'
+                              : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">Provider</label>
+                      <select
+                        value={currentProfile.provider}
+                        onChange={(e) =>
+                          updateProfile({
+                            provider: e.target.value as ImagePipelineProfile['provider'],
+                          })
+                        }
+                        className="w-full bg-[#0d111b] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      >
+                        <option value="inherit">Inherit Global ({draftConfig.image_provider})</option>
+                        <option value="comfyui">ComfyUI (Cloud Run GPU / Local)</option>
+                        <option value="vertex_imagen">Vertex AI Imagen</option>
+                        <option value="runpod_serverless">RunPod Serverless</option>
+                        <option value="procedural_art">Procedural Canvas</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">
+                        ComfyUI Checkpoint (blank = inherit)
+                      </label>
+                      <input
+                        type="text"
+                        list="comfyui-checkpoints-list"
+                        value={currentProfile.checkpoint}
+                        onChange={(e) => updateProfile({ checkpoint: e.target.value })}
+                        placeholder={draftConfig.comfyui_checkpoint}
+                        className="w-full bg-[#0d111b] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-cyan-200 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">Render Mode</label>
+                      <select
+                        value={currentProfile.render_mode}
+                        onChange={(e) => updateProfile({ render_mode: e.target.value })}
+                        className="w-full bg-[#0d111b] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      >
+                        <option value="inherit">Inherit Global</option>
+                        <option value="single_stylized">single_stylized</option>
+                        <option value="single_raw">single_raw</option>
+                        <option value="hybrid_refiner">hybrid_refiner</option>
+                        <option value="action_hybrid">action_hybrid</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">
+                        Steps (blank = default)
+                      </label>
+                      <input
+                        type="number"
+                        value={currentProfile.steps ?? ''}
+                        onChange={(e) =>
+                          updateProfile({
+                            steps: e.target.value ? Number(e.target.value) : null,
+                          })
+                        }
+                        placeholder={String(draftConfig.default_steps)}
+                        className="w-full bg-[#0d111b] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">
+                        CFG (blank = default)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        value={currentProfile.cfg ?? ''}
+                        onChange={(e) =>
+                          updateProfile({
+                            cfg: e.target.value ? Number(e.target.value) : null,
+                          })
+                        }
+                        placeholder={String(draftConfig.default_cfg)}
+                        className="w-full bg-[#0d111b] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">FaceDetailer</label>
+                      <select
+                        value={
+                          currentProfile.face_detailer === null
+                            ? 'inherit'
+                            : currentProfile.face_detailer
+                            ? 'on'
+                            : 'off'
+                        }
+                        onChange={(e) =>
+                          updateProfile({
+                            face_detailer:
+                              e.target.value === 'inherit'
+                                ? null
+                                : e.target.value === 'on',
+                          })
+                        }
+                        className="w-full bg-[#0d111b] border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white"
+                      >
+                        <option value="inherit">Inherit Global</option>
+                        <option value="on">Enabled</option>
+                        <option value="off">Disabled</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             <details className="rounded-xl border border-white/10 bg-[#0d111b]/80 p-3 space-y-2.5">
               <summary className="text-xs font-bold uppercase tracking-wider text-cyan-300 cursor-pointer select-none flex items-center justify-between">

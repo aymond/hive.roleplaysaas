@@ -470,6 +470,57 @@ async def _fetch_comfy_node_image_bytes(
     return None, ""
 
 
+def resolve_image_profile(
+    config: InferenceConfig,
+    pipeline_role: str | None = None,
+) -> dict[str, Any]:
+    """
+    Resolves effective image generation settings for a given pipeline role
+    ('portrait', 'scene', 'scenery', 'workflow').
+    When `use_specialist_image_models` is False or `pipeline_role` is None,
+    returns the unified global config ("one model for all").
+    """
+    resolved = {
+        "provider": config.image_provider,
+        "checkpoint": config.comfyui_checkpoint,
+        "vertex_model": getattr(config, "vertex_imagen_model", "imagen-3.0-generate-002"),
+        "render_mode": getattr(config, "comfyui_render_mode", "single_stylized"),
+        "face_detailer": getattr(config, "comfyui_face_detailer_enabled", True),
+        "steps": config.default_steps,
+        "cfg": config.default_cfg,
+    }
+    if not getattr(config, "use_specialist_image_models", True) or not pipeline_role:
+        return resolved
+
+    profile_attr = {
+        "portrait": "portrait_profile",
+        "scene": "scene_profile",
+        "scenery": "scenery_profile",
+        "workflow": "workflow_profile",
+    }.get(pipeline_role)
+    profile = getattr(config, profile_attr, None) if profile_attr else None
+    if not profile:
+        return resolved
+
+    if profile.provider and profile.provider != "inherit":
+        resolved["provider"] = profile.provider
+    if profile.checkpoint and profile.checkpoint.strip():
+        resolved["checkpoint"] = profile.checkpoint.strip()
+    elif pipeline_role == "scenery" and getattr(config, "comfyui_landscape_checkpoint", "").strip():
+        resolved["checkpoint"] = config.comfyui_landscape_checkpoint.strip()
+    if profile.vertex_model and profile.vertex_model.strip():
+        resolved["vertex_model"] = profile.vertex_model.strip()
+    if profile.render_mode and profile.render_mode != "inherit":
+        resolved["render_mode"] = profile.render_mode
+    if profile.face_detailer is not None:
+        resolved["face_detailer"] = profile.face_detailer
+    if profile.steps is not None:
+        resolved["steps"] = profile.steps
+    if profile.cfg is not None:
+        resolved["cfg"] = profile.cfg
+    return resolved
+
+
 def _select_landscape_checkpoint(config: InferenceConfig, available_ckpts: list[str]) -> str | None:
     """Select the best available checkpoint for landscapes, maps, and architectural scenery."""
     if not available_ckpts:
@@ -503,6 +554,7 @@ async def _run_comfyui_bridge(
     face_detailer_override: bool | None = None,
     prefer_stylized_non_pony: bool = False,
     landscape_mode: bool = False,
+    checkpoint_override: str | None = None,
 ) -> tuple[bytes | None, str]:
     status = await check_comfyui_status(config.comfyui_base_url)
     if not status["online"]:
@@ -512,8 +564,8 @@ async def _run_comfyui_bridge(
     base = status.get("active_url", config.comfyui_base_url).rstrip("/")
     available_ckpts: list[str] = status.get("checkpoints", [])
     face_detectors: list[str] = status.get("face_detectors", [])
-    ckpt_to_use = config.comfyui_checkpoint
-    if (landscape_mode or prefer_stylized_non_pony) and available_ckpts:
+    ckpt_to_use = (checkpoint_override or "").strip() or config.comfyui_checkpoint
+    if (landscape_mode or prefer_stylized_non_pony) and available_ckpts and not checkpoint_override:
         landscape_ckpt = _select_landscape_checkpoint(config, available_ckpts)
         if landscape_ckpt:
             ckpt_to_use = landscape_ckpt
@@ -944,11 +996,15 @@ async def _run_vertex_imagen(
     negative_prompt: str,
     width: int,
     height: int,
+    model_override: str | None = None,
 ) -> tuple[bytes | None, str]:
     """Configurable Vertex AI Imagen provider (uses GCP ADC)."""
     project_id = (getattr(config, "vertex_project_id", "") or "").strip()
     location = (getattr(config, "vertex_location", "europe-west4") or "europe-west4").strip()
-    model_id = (getattr(config, "vertex_imagen_model", "imagen-3.0-generate-002") or "imagen-3.0-generate-002").strip()
+    model_id = (
+        (model_override or "").strip()
+        or (getattr(config, "vertex_imagen_model", "imagen-3.0-generate-002") or "imagen-3.0-generate-002").strip()
+    )
     if not project_id:
         logger.warning("⚠️ VERTEX⏭  | vertex_project_id not configured — skipping Vertex Imagen")
         return None, ""
@@ -1050,24 +1106,36 @@ async def generate_image_asset(
     face_detailer_override: bool | None = None,
     prefer_stylized_non_pony: bool = False,
     landscape_mode: bool = False,
+    pipeline_role: str | None = None,
 ) -> dict[str, Any]:
     """
-    Generates an image using the configured Apple Silicon Image Engine, writes it to output_dir,
-    and returns metadata including the relative URL (`/media/generated/...`).
+    Generates an image using the configured Image Engine (or specialist pipeline profile),
+    writes it to output_dir, and returns metadata including `/media/generated/...`.
     """
+    prof = resolve_image_profile(config, pipeline_role=pipeline_role)
+    active_provider = prof["provider"]
+    active_checkpoint = prof["checkpoint"]
+    active_vertex_model = prof["vertex_model"]
+    effective_render_mode = render_mode_override or prof["render_mode"]
+    effective_face_detailer = (
+        face_detailer_override if face_detailer_override is not None else prof["face_detailer"]
+    )
+
     w = width or config.default_width
     h = height or config.default_height
-    st = steps or config.default_steps
-    guidance = cfg if cfg is not None else config.default_cfg
+    st = steps if steps is not None else prof["steps"]
+    guidance = cfg if cfg is not None else prof["cfg"]
     actual_seed = seed if seed is not None else int.from_bytes(uuid.uuid4().bytes[:4], "big") % 1_000_000
 
     t_start = time.perf_counter()
     img_bytes: bytes | None = None
-    provider_used = "procedural_art (Apple Silicon Instant Canvas)"
+    provider_used = "procedural_art (Cloud Instant Canvas)"
 
     logger.info(
-        "🎨 IMAGE→   | provider=%s | %dx%d | steps=%d | cfg=%.1f | seed=%d",
-        config.image_provider,
+        "🎨 IMAGE→   | role=%s | provider=%s | ckpt=%s | %dx%d | steps=%d | cfg=%.1f | seed=%d",
+        pipeline_role or "default",
+        active_provider,
+        active_checkpoint,
         w,
         h,
         st,
@@ -1076,18 +1144,19 @@ async def generate_image_asset(
     )
 
     # 0. Try configured cloud providers when explicitly selected
-    if config.image_provider == "vertex_imagen":
+    if active_provider == "vertex_imagen":
         img_bytes, vertex_label = await _run_vertex_imagen(
             config=config,
             prompt=prompt,
             negative_prompt=negative_prompt,
             width=w,
             height=h,
+            model_override=active_vertex_model,
         )
         if img_bytes:
             provider_used = vertex_label
 
-    if img_bytes is None and config.image_provider == "runpod_serverless":
+    if img_bytes is None and active_provider == "runpod_serverless":
         img_bytes, runpod_label = await _run_runpod_serverless(
             config=config,
             prompt=prompt,
@@ -1102,7 +1171,7 @@ async def generate_image_asset(
             provider_used = runpod_label
 
     # 1. Try ComfyUI if configured or auto
-    if img_bytes is None and config.image_provider in ("comfyui", "auto"):
+    if img_bytes is None and active_provider in ("comfyui", "auto"):
         img_bytes, comfy_label = await _run_comfyui_bridge(
             config=config,
             prompt=prompt,
@@ -1112,16 +1181,17 @@ async def generate_image_asset(
             steps=st,
             cfg=guidance,
             seed=actual_seed,
-            render_mode_override=render_mode_override,
-            face_detailer_override=face_detailer_override,
+            render_mode_override=effective_render_mode,
+            face_detailer_override=effective_face_detailer,
             prefer_stylized_non_pony=prefer_stylized_non_pony,
             landscape_mode=landscape_mode,
+            checkpoint_override=active_checkpoint,
         )
         if img_bytes:
-            provider_used = comfy_label or f"comfyui ({config.comfyui_checkpoint})"
+            provider_used = comfy_label or f"comfyui ({active_checkpoint})"
 
-    # 2. Try Native Apple Silicon PyTorch MPS Diffusers
-    if img_bytes is None and config.image_provider in ("mps_diffusers", "auto"):
+    # 2. Try Native PyTorch MPS Diffusers
+    if img_bytes is None and active_provider in ("mps_diffusers", "auto"):
         allow_download = config.image_provider == "mps_diffusers"
         img_bytes = await asyncio.to_thread(
             _run_mps_diffusers_sync,

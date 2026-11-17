@@ -356,6 +356,7 @@ async def create_character(card: CharacterCard) -> CharacterCard:
             output_dir=storage.generated_dir,
             prompt=prompt,
             negative_prompt=card.negative_prompt_tags,
+            pipeline_role="portrait",
         )
         card.avatar_url = img_meta["url"]
     card.updated_at = utc_now_iso()
@@ -412,6 +413,7 @@ async def generate_character_avatar(char_id: str, seed: int | None = None) -> di
         prompt=full_prompt,
         negative_prompt=card.negative_prompt_tags,
         seed=seed,
+        pipeline_role="portrait",
     )
     card.avatar_url = img_meta["url"]
     card.updated_at = utc_now_iso()
@@ -486,6 +488,7 @@ async def import_character_card(file: UploadFile = File(...)) -> CharacterCard:
             config=storage.config,
             output_dir=storage.generated_dir,
             prompt=card.visual_prompt_tags or f"portrait of {card.name}, {card.title}",
+            pipeline_role="portrait",
         )
         card.avatar_url = img_meta["url"]
 
@@ -746,6 +749,7 @@ async def generate_world_map(
         render_mode_override="single_stylized",
         face_detailer_override=False,
         landscape_mode=True,
+        pipeline_role="scenery",
     )
     world.map_image_url = img_meta["url"]
     world.map_prompt = map_prompt
@@ -859,6 +863,7 @@ async def generate_lore_entry_artwork(world_id: str, entry_id: str) -> dict[str,
         render_mode_override="single_stylized",
         face_detailer_override=False if is_location else None,
         landscape_mode=is_location,
+        pipeline_role="scenery" if is_location else "scene",
     )
     target_entry.image_url = img_meta["url"]
     world.updated_at = utc_now_iso()
@@ -1061,6 +1066,7 @@ async def send_chat_message(chat_id: str, req: SendMessageRequest) -> dict[str, 
             output_dir=storage.generated_dir,
             prompt=image_prompt,
             negative_prompt=card.negative_prompt_tags,
+            pipeline_role="scene",
         )
         ill_render_ms = (time.perf_counter() - t_ill_render) * 1000
         illustrate_timings = {
@@ -1403,6 +1409,7 @@ async def illustrate_chat_message(
         output_dir=storage.generated_dir,
         prompt=full_prompt,
         negative_prompt=card.negative_prompt_tags if card else "blurry, low quality",
+        pipeline_role="scene",
     )
     render_ms = (time.perf_counter() - t0) * 1000
     total_ms = (time.perf_counter() - t_total0) * 1000
@@ -1755,6 +1762,7 @@ async def generate_backstory_grounded_image(req: BackstoryImageRequest) -> dict[
         seed=req.seed,
         render_mode_override=active_mode,
         face_detailer_override=req.face_detailer,
+        pipeline_role="scene",
     )
     render_ms = (time.perf_counter() - t_render_start) * 1000
     total_ms = (time.perf_counter() - t_studio_start) * 1000

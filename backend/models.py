@@ -181,6 +181,24 @@ class WorkflowExecutionResult(BaseModel):
     final_text: str = ""
 
 
+class ImagePipelineProfile(BaseModel):
+    provider: Literal[
+        "inherit",
+        "auto",
+        "mps_diffusers",
+        "comfyui",
+        "vertex_imagen",
+        "runpod_serverless",
+        "procedural_art",
+    ] = "inherit"
+    checkpoint: str = ""
+    vertex_model: str = ""
+    render_mode: str = "inherit"
+    face_detailer: bool | None = None
+    steps: int | None = None
+    cfg: float | None = None
+
+
 class InferenceConfig(BaseModel):
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     sfw_mode: bool = True
@@ -242,6 +260,23 @@ class InferenceConfig(BaseModel):
     default_height: int = 1024
     default_steps: int = 20
     default_cfg: float = 6.0
+    use_specialist_image_models: bool = True
+    portrait_profile: ImagePipelineProfile = Field(
+        default_factory=lambda: ImagePipelineProfile(face_detailer=True)
+    )
+    scene_profile: ImagePipelineProfile = Field(
+        default_factory=lambda: ImagePipelineProfile(face_detailer=True)
+    )
+    scenery_profile: ImagePipelineProfile = Field(
+        default_factory=lambda: ImagePipelineProfile(
+            checkpoint="Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+            render_mode="single_stylized",
+            face_detailer=False,
+            steps=22,
+            cfg=5.5,
+        )
+    )
+    workflow_profile: ImagePipelineProfile = Field(default_factory=ImagePipelineProfile)
     scene_prompt_template: str = (
         "{quality}, {anatomical_overrides}, {solo}, {action_tags}, "
         "{character_traits}, {scene_state}, {location_lore}, {dialog_scene}"

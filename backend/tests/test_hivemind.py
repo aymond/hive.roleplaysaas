@@ -1160,6 +1160,47 @@ def test_sfw_moderation_blocks_before_llm_and_admin_rbac(monkeypatch) -> None:
         main_mod.storage.chats.pop(sess.id, None)
 
 
+def test_specialist_vs_unified_image_profiles() -> None:
+    from backend.inference.image_engine import resolve_image_profile
+    from backend.models import ImagePipelineProfile
+
+    cfg = InferenceConfig(
+        image_provider="comfyui",
+        comfyui_checkpoint="BaseUnified.safetensors",
+        use_specialist_image_models=True,
+        portrait_profile=ImagePipelineProfile(
+            provider="comfyui",
+            checkpoint="PortraitSpecialist.safetensors",
+            face_detailer=True,
+        ),
+        scenery_profile=ImagePipelineProfile(
+            provider="vertex_imagen",
+            checkpoint="RealVisXL_V5.0.safetensors",
+            face_detailer=False,
+            steps=24,
+            cfg=5.5,
+        ),
+    )
+
+    p_portrait = resolve_image_profile(cfg, "portrait")
+    assert p_portrait["provider"] == "comfyui"
+    assert p_portrait["checkpoint"] == "PortraitSpecialist.safetensors"
+    assert p_portrait["face_detailer"] is True
+
+    p_scenery = resolve_image_profile(cfg, "scenery")
+    assert p_scenery["provider"] == "vertex_imagen"
+    assert p_scenery["checkpoint"] == "RealVisXL_V5.0.safetensors"
+    assert p_scenery["face_detailer"] is False
+    assert p_scenery["steps"] == 24
+    assert p_scenery["cfg"] == 5.5
+
+    # Unified ("one model for all") mode ignores specialist overrides
+    cfg.use_specialist_image_models = False
+    u_scenery = resolve_image_profile(cfg, "scenery")
+    assert u_scenery["provider"] == "comfyui"
+    assert u_scenery["checkpoint"] == "BaseUnified.safetensors"
+
+
 
 
 
