@@ -14,8 +14,10 @@ frontend/.vite/
 
 # Local Runtime State & Generated Media
 backend/data/generated/hm_*.png
+backend/data/generated/hm_*.json
 backend/data/generated/imported_*.png
 backend/data/studio_state.json
+backend/data/metrics.jsonl
 
 # OS & Editor
 .DS_Store
