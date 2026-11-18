@@ -265,11 +265,9 @@ async def _call_vertex_gemini_chat(
     if not project_id:
         return None
     try:
-        import google.auth
-        import google.auth.transport.requests
+        from ..gcp_http import get_gcp_access_token, get_shared_http_client
 
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        creds.refresh(google.auth.transport.requests.Request())
+        token = await get_gcp_access_token()
 
         system_parts = [m["content"] for m in messages if m.get("role") == "system" and m.get("content")]
         contents = [
@@ -297,21 +295,21 @@ async def _call_vertex_gemini_chat(
             f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}"
             f"/locations/{location}/publishers/google/models/{model_id}:generateContent"
         )
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {creds.token}"},
-                json=payload,
-            )
-            if resp.status_code == 200:
-                cands = resp.json().get("candidates", [])
-                if cands:
-                    parts = cands[0].get("content", {}).get("parts", [])
-                    text = "".join(p.get("text", "") for p in parts).strip()
-                    if text:
-                        logger.info("🤖 VERTEX←  | purpose=%s | model=%s | chars=%d", purpose, model_id, len(text))
-                        return text
-            logger.warning("⚠️ VERTEX   | purpose=%s status=%d body=%s", purpose, resp.status_code, resp.text[:200])
+        client = get_shared_http_client(timeout=60.0)
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        if resp.status_code == 200:
+            cands = resp.json().get("candidates", [])
+            if cands:
+                parts = cands[0].get("content", {}).get("parts", [])
+                text = "".join(p.get("text", "") for p in parts).strip()
+                if text:
+                    logger.info("🤖 VERTEX←  | purpose=%s | model=%s | chars=%d", purpose, model_id, len(text))
+                    return text
+        logger.warning("⚠️ VERTEX   | purpose=%s status=%d body=%s", purpose, resp.status_code, resp.text[:200])
     except Exception as exc:
         logger.warning("⚠️ VERTEX   | purpose=%s error=%s", purpose, exc)
     return None
@@ -428,6 +426,75 @@ async def stream_roleplay_reply(
     scene_state: SceneState | None = None,
 ):
     """Async generator yielding (chunk_text, provider_used) tuples for live token streaming."""
+    vertex_project = (getattr(config, "vertex_project_id", "") or os.getenv("GCP_PROJECT_ID", "")).strip()
+    if config.llm_provider in ("auto", "vertex_gemini") and vertex_project:
+        location = (getattr(config, "vertex_location", "europe-west4") or os.getenv("GCP_REGION", "europe-west4")).strip()
+        model_id = (getattr(config, "vertex_gemini_model", "gemini-2.5-flash") or "gemini-2.5-flash").strip()
+        sys_prompt = build_tavern_system_prompt(
+            character,
+            lore_context,
+            user_name,
+            user_desc,
+            situation_checkpoint=situation_checkpoint,
+            scene_state=scene_state,
+        )
+        recent_window = history[-8:] if (situation_checkpoint and situation_checkpoint.strip()) else history[-12:]
+        contents = [
+            {
+                "role": "model" if msg.role == "assistant" else "user",
+                "parts": [{"text": msg.content}],
+            }
+            for msg in recent_window
+            if msg.content
+        ]
+        payload: dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": config.temperature,
+                "maxOutputTokens": config.max_tokens,
+                "topP": 0.92,
+            },
+            "systemInstruction": {"parts": [{"text": sys_prompt}]},
+        }
+        url = (
+            f"https://{location}-aiplatform.googleapis.com/v1/projects/{vertex_project}"
+            f"/locations/{location}/publishers/google/models/{model_id}:streamGenerateContent?alt=sse"
+        )
+        provider_label = f"vertex_gemini ({model_id})"
+        try:
+            from ..gcp_http import get_gcp_access_token, get_shared_http_client
+
+            token = await get_gcp_access_token()
+            client = get_shared_http_client(timeout=60.0)
+            yielded_any = False
+            async with client.stream(
+                "POST",
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            ) as resp:
+                if resp.status_code == 200:
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        raw = line[5:].strip()
+                        if not raw or raw == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(raw)
+                        except Exception:
+                            continue
+                        for cand in chunk.get("candidates", []):
+                            for part in cand.get("content", {}).get("parts", []):
+                                delta = part.get("text", "")
+                                if delta:
+                                    yielded_any = True
+                                    yield delta, provider_label
+            if yielded_any:
+                return
+        except Exception as exc:
+            logger.warning("⚠️ VERTEX←  | Streaming fallback triggered: %s", exc)
+
     if config.llm_provider in ("auto", "ollama"):
         status = await check_ollama_status(config.ollama_base_url)
         if status["online"] and status["models"]:

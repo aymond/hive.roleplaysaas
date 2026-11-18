@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+from collections import OrderedDict
 from typing import Any
 
 from .logger import logger
@@ -29,7 +32,22 @@ class FirestoreTenantWorkspace(TenantWorkspace):
         self.chats: dict[str, ChatSession] = {}
         self.workflows: dict[str, WorkflowGraph] = {}
         self.gallery: list[GalleryAsset] = []
+        self._last_saved_hashes: dict[str, dict[str, str]] = {
+            "characters": {},
+            "worlds": {},
+            "chats": {},
+            "workflows": {},
+            "gallery": {},
+        }
         self._load_or_seed(template_store)
+
+    @staticmethod
+    def _model_hash(model: Any) -> str:
+        raw = json.dumps(model.model_dump(), sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _record_loaded_hashes(self, name: str, items: dict[str, Any]) -> None:
+        self._last_saved_hashes[name] = {k: self._model_hash(v) for k, v in items.items()}
 
     def _load_or_seed(self, template_store: StudioStorage) -> None:
         user_snap = self._user_ref.get()
@@ -54,28 +72,38 @@ class FirestoreTenantWorkspace(TenantWorkspace):
         for doc in self._user_ref.collection("characters").stream():
             c = CharacterCard.model_validate(doc.to_dict())
             self.characters[c.id] = c
+        self._record_loaded_hashes("characters", self.characters)
         for doc in self._user_ref.collection("worlds").stream():
             w = Lorebook.model_validate(doc.to_dict())
             self.worlds[w.id] = w
+        self._record_loaded_hashes("worlds", self.worlds)
         for doc in self._user_ref.collection("chats").stream():
             ch = ChatSession.model_validate(doc.to_dict())
             self.chats[ch.id] = ch
+        self._record_loaded_hashes("chats", self.chats)
         for doc in self._user_ref.collection("workflows").stream():
             wf = WorkflowGraph.model_validate(doc.to_dict())
             self.workflows[wf.id] = wf
+        self._record_loaded_hashes("workflows", self.workflows)
         gallery_items = [
             GalleryAsset.model_validate(doc.to_dict())
             for doc in self._user_ref.collection("gallery").stream()
         ]
         self.gallery = sorted(gallery_items, key=lambda g: g.created_at, reverse=True)
+        self._record_loaded_hashes("gallery", {g.id: g for g in self.gallery})
 
     def _sync_collection(self, name: str, items: dict[str, Any]) -> None:
         col = self._user_ref.collection(name)
-        existing_ids = {d.id for d in col.stream()}
+        prev_hashes = self._last_saved_hashes.setdefault(name, {})
+        next_hashes: dict[str, str] = {}
         for item_id, model in items.items():
-            col.document(item_id).set(model.model_dump())
-        for stale_id in existing_ids - set(items.keys()):
+            digest = self._model_hash(model)
+            next_hashes[item_id] = digest
+            if prev_hashes.get(item_id) != digest:
+                col.document(item_id).set(model.model_dump())
+        for stale_id in set(prev_hashes.keys()) - set(items.keys()):
             col.document(stale_id).delete()
+        self._last_saved_hashes[name] = next_hashes
 
     def save(self) -> None:
         self._sync_collection("characters", self.characters)
@@ -89,12 +117,14 @@ class FirestoreTenantWorkspace(TenantWorkspace):
 class FirestoreStorage(StudioStorage):
     """Multi-tenant Firestore storage backend for Cloud Run SaaS deployments."""
 
+    MAX_CACHED_TENANTS = 64
+
     def __init__(self) -> None:
         super().__init__()
         from google.cloud import firestore  # type: ignore[import-not-found]
 
         self._db = firestore.Client(project=os.getenv("GCP_PROJECT_ID") or None)
-        self._tenant_cache: dict[str, FirestoreTenantWorkspace] = {}
+        self._tenant_cache: OrderedDict[str, FirestoreTenantWorkspace] = OrderedDict()
         self._load_global_configs()
 
     def _load_global_configs(self) -> None:
@@ -116,9 +146,14 @@ class FirestoreStorage(StudioStorage):
             logger.warning("⚠️ FIRESTORE | Failed to save global config: %s", exc)
 
     def for_user(self, uid: str) -> FirestoreTenantWorkspace:
-        if uid not in self._tenant_cache:
-            self._tenant_cache[uid] = FirestoreTenantWorkspace(self._db, uid, self)
-        return self._tenant_cache[uid]
+        if uid in self._tenant_cache:
+            self._tenant_cache.move_to_end(uid)
+            return self._tenant_cache[uid]
+        ws = FirestoreTenantWorkspace(self._db, uid, self)
+        self._tenant_cache[uid] = ws
+        while len(self._tenant_cache) > self.MAX_CACHED_TENANTS:
+            self._tenant_cache.popitem(last=False)
+        return ws
 
     def get_user_billing(self, uid: str) -> dict[str, Any]:
         snap = self._db.collection("users").document(uid).get()

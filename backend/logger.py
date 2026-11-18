@@ -25,6 +25,25 @@ class _QuietPollingAccessFilter(logging.Filter):
         return True
 
 
+class _JsonCloudFormatter(logging.Formatter):
+    """Structured JSON formatter compatible with Google Cloud Logging."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        import json
+
+        payload: dict[str, object] = {
+            "severity": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+        }
+        service = os.environ.get("K_SERVICE")
+        if service:
+            payload["service"] = service
+        if record.exc_info:
+            payload["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
 def setup_hivemind_logger(level_name: str | None = None) -> logging.Logger:
     logger = logging.getLogger("hivemind")
     resolved_name = (level_name or os.environ.get("HIVEMIND_LOG_LEVEL", "INFO")).upper()
@@ -33,10 +52,17 @@ def setup_hivemind_logger(level_name: str | None = None) -> logging.Logger:
 
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter(
-            fmt="\033[36m%(asctime)s\033[0m [\033[1;33mHIVEMIND\033[0m] %(message)s",
-            datefmt="%H:%M:%S",
+        use_json = (
+            os.environ.get("LOG_FORMAT", "").strip().lower() == "json"
+            or bool(os.environ.get("K_SERVICE"))
         )
+        if use_json:
+            formatter: logging.Formatter = _JsonCloudFormatter()
+        else:
+            formatter = logging.Formatter(
+                fmt="\033[36m%(asctime)s\033[0m [\033[1;33mHIVEMIND\033[0m] %(message)s",
+                datefmt="%H:%M:%S",
+            )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.propagate = False

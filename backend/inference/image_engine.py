@@ -1010,36 +1010,34 @@ async def _run_vertex_imagen(
         return None, ""
     try:
         import base64
-        import google.auth
-        import google.auth.transport.requests
+        from ..gcp_http import get_gcp_access_token, get_shared_http_client
 
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        creds.refresh(google.auth.transport.requests.Request())
+        token = await get_gcp_access_token()
         aspect = "4:3" if width > height else ("3:4" if height > width else "1:1")
         url = (
             f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}"
             f"/locations/{location}/publishers/google/models/{model_id}:predict"
         )
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {creds.token}"},
-                json={
-                    "instances": [{"prompt": prompt}],
-                    "parameters": {
-                        "sampleCount": 1,
-                        "aspectRatio": aspect,
-                        "negativePrompt": negative_prompt,
-                        "personGeneration": "allow_adult",
-                        "safetySetting": "block_medium_and_above",
-                    },
+        client = get_shared_http_client(timeout=60.0)
+        resp = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "instances": [{"prompt": prompt}],
+                "parameters": {
+                    "sampleCount": 1,
+                    "aspectRatio": aspect,
+                    "negativePrompt": negative_prompt,
+                    "personGeneration": "allow_adult",
+                    "safetySetting": "block_medium_and_above",
                 },
-            )
-            if resp.status_code == 200:
-                preds = resp.json().get("predictions", [])
-                if preds and preds[0].get("bytesBase64Encoded"):
-                    return base64.b64decode(preds[0]["bytesBase64Encoded"]), f"vertex_imagen ({model_id})"
-            logger.warning("⚠️ VERTEX   | status=%d body=%s", resp.status_code, resp.text[:200])
+            },
+        )
+        if resp.status_code == 200:
+            preds = resp.json().get("predictions", [])
+            if preds and preds[0].get("bytesBase64Encoded"):
+                return base64.b64decode(preds[0]["bytesBase64Encoded"]), f"vertex_imagen ({model_id})"
+        logger.warning("⚠️ VERTEX   | status=%d body=%s", resp.status_code, resp.text[:200])
     except Exception as exc:
         logger.warning("⚠️ VERTEX   | Vertex Imagen call failed: %s", exc)
     return None, ""
@@ -1063,30 +1061,31 @@ async def _run_runpod_serverless(
         return None, ""
     try:
         import base64
+        from ..gcp_http import get_shared_http_client
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "input": {
-                        "prompt": prompt,
-                        "negative_prompt": negative_prompt,
-                        "width": width,
-                        "height": height,
-                        "steps": steps,
-                        "cfg": cfg,
-                        "seed": seed,
-                        "checkpoint": config.comfyui_checkpoint,
-                    }
-                },
-            )
-            if resp.status_code == 200:
-                out = resp.json().get("output") or {}
-                b64 = out.get("image_base64") or (out.get("images", [None])[0] if isinstance(out.get("images"), list) else None)
-                if isinstance(b64, str) and b64:
-                    return base64.b64decode(b64.split(",", 1)[-1]), f"runpod_serverless ({config.comfyui_checkpoint})"
-            logger.warning("⚠️ RUNPOD   | status=%d body=%s", resp.status_code, resp.text[:200])
+        client = get_shared_http_client(timeout=120.0)
+        resp = await client.post(
+            f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "input": {
+                    "prompt": prompt,
+                    "negative_prompt": negative_prompt,
+                    "width": width,
+                    "height": height,
+                    "steps": steps,
+                    "cfg": cfg,
+                    "seed": seed,
+                    "checkpoint": config.comfyui_checkpoint,
+                }
+            },
+        )
+        if resp.status_code == 200:
+            out = resp.json().get("output") or {}
+            b64 = out.get("image_base64") or (out.get("images", [None])[0] if isinstance(out.get("images"), list) else None)
+            if isinstance(b64, str) and b64:
+                return base64.b64decode(b64.split(",", 1)[-1]), f"runpod_serverless ({config.comfyui_checkpoint})"
+        logger.warning("⚠️ RUNPOD   | status=%d body=%s", resp.status_code, resp.text[:200])
     except Exception as exc:
         logger.warning("⚠️ RUNPOD   | RunPod Serverless call failed: %s", exc)
     return None, ""

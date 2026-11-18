@@ -1284,3 +1284,63 @@ def test_multi_tenant_isolation_and_rbac(monkeypatch) -> None:
 
 
 
+
+
+def test_l6_security_and_reliability_hardening(monkeypatch) -> None:
+    import json
+    import logging
+
+    import backend.main as main_mod
+    from backend.billing import _validate_redirect_url
+    from backend.logger import _JsonCloudFormatter
+
+    client = TestClient(main_mod.app)
+    orig_openai = main_mod.storage.config.openai_api_key
+    orig_runpod = main_mod.storage.config.runpod_api_key
+    try:
+        main_mod.storage.config.openai_api_key = "sk-secret-openai-test"
+        main_mod.storage.config.runpod_api_key = "rp-secret-runpod-test"
+
+        # 1. Non-admin user sees redacted secrets in /api/system/status
+        user_status = client.get(
+            "/api/system/status",
+            headers={"X-Mock-Uid": "non-admin-user", "X-Mock-Role": "user"},
+        )
+        assert user_status.status_code == 200
+        cfg = user_status.json()["config"]
+        assert cfg["openai_api_key"] == "***"
+        assert cfg["runpod_api_key"] == "***"
+
+        # Admin user sees unredacted secrets
+        admin_status = client.get(
+            "/api/system/status",
+            headers={"X-Mock-Uid": "admin-user", "X-Mock-Role": "admin"},
+        )
+        assert admin_status.status_code == 200
+        admin_cfg = admin_status.json()["config"]
+        assert admin_cfg["openai_api_key"] == "sk-secret-openai-test"
+        assert admin_cfg["runpod_api_key"] == "rp-secret-runpod-test"
+
+        # 2. Billing redirect URL allowlist validation
+        monkeypatch.setenv("ALLOWED_ORIGINS", "https://app.example.com")
+        assert _validate_redirect_url("https://app.example.com/billing/ok") == "https://app.example.com/billing/ok"
+        try:
+            _validate_redirect_url("https://evil.example.net/phish")
+            assert False, "Expected HTTPException for disallowed redirect origin"
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 400
+
+        # 3. JSON Cloud Logging formatter
+        monkeypatch.setenv("K_SERVICE", "hivemind-api")
+        formatter = _JsonCloudFormatter()
+        record = logging.LogRecord("hivemind", logging.WARNING, __file__, 1, "Cloud test %s", ("ok",), None)
+        parsed = json.loads(formatter.format(record))
+        assert parsed["severity"] == "WARNING"
+        assert parsed["message"] == "Cloud test ok"
+        assert parsed["logger"] == "hivemind"
+        assert parsed["service"] == "hivemind-api"
+    finally:
+        main_mod.storage.config.openai_api_key = orig_openai
+        main_mod.storage.config.runpod_api_key = orig_runpod
+        main_mod.storage._tenants.pop("non-admin-user", None)
+        main_mod.storage._tenants.pop("admin-user", None)

@@ -290,6 +290,13 @@ async def get_system_status(user: AuthenticatedUser = Depends(get_current_user))
     )
     comfyui = await check_comfyui_status(storage.config.comfyui_base_url)
 
+    config_payload = storage.config.model_dump()
+    if user.role != "admin":
+        if config_payload.get("openai_api_key"):
+            config_payload["openai_api_key"] = "***"
+        if config_payload.get("runpod_api_key"):
+            config_payload["runpod_api_key"] = "***"
+
     return {
         "hardware": hw,
         "providers": {
@@ -297,7 +304,7 @@ async def get_system_status(user: AuthenticatedUser = Depends(get_current_user))
             "openai_compat": openai_compat,
             "comfyui": comfyui,
         },
-        "config": storage.config.model_dump(),
+        "config": config_payload,
         "counts": {
             "characters": len(ws.characters),
             "worlds": len(ws.worlds),
