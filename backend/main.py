@@ -1239,6 +1239,24 @@ async def create_chat_session(
         active_swipe=0,
         triggered_lore=scan_res.triggered,
     )
+    ap = getattr(card, "appearance", None)
+    initial_location = ""
+    if world and world.entries:
+        loc_entry = next((e for e in world.entries if e.enabled and e.category == "location"), None)
+        if loc_entry:
+            initial_location = loc_entry.title
+        else:
+            initial_location = world.name
+    elif world:
+        initial_location = world.name
+
+    hair_parts = [
+        (getattr(ap, "hair_color", "") or "").strip(),
+        (getattr(ap, "hair_style", "") or "").strip(),
+    ]
+    initial_hair = " ".join(p for p in hair_parts if p)
+    initial_attire = (getattr(ap, "default_attire", "") or "").strip()
+
     session = ChatSession(
         title=req.title or f"Chronicle with {card.name}",
         character_id=card.id,
@@ -1246,6 +1264,11 @@ async def create_chat_session(
         user_persona_name=req.user_persona_name,
         user_persona_desc=req.user_persona_desc,
         messages=[first_msg],
+        scene_state=SceneState(
+            location=initial_location,
+            attire=initial_attire,
+            hairstyle=initial_hair,
+        ),
     )
     ws.chats[session.id] = session
     ws.save()

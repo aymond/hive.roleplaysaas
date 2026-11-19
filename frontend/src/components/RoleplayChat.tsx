@@ -121,10 +121,8 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     pinned_fields: [],
   });
 
-  // Backstory Standalone Image Generator state
-  const [backstoryPrompt, setBackstoryPrompt] = useState(
-    'relaxing by the candlelit infinity pool overlooking the turquoise lagoon at sunset, warm golden hour breeze'
-  );
+  // Backstory Standalone Image Generator state (grounded in active character & world)
+  const [backstoryPrompt, setBackstoryPrompt] = useState('');
   const [includeCharVisuals, setIncludeCharVisuals] = useState(true);
   const [includeScenario, setIncludeScenario] = useState(true);
   const [includeWorldLore, setIncludeWorldLore] = useState(true);
@@ -391,12 +389,54 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
     }
   };
 
-  const quickBackstoryIdeas = [
-    'Walking barefoot along the sunlit shoreline in the ocean breeze',
-    'Sipping a tropical cocktail at the candlelit beach cabana at dusk',
-    'Close-up golden hour portrait smiling by the turquoise infinity pool',
-    'Stargazing on the private teakwood deck over the calm lagoon',
-  ];
+  const buildQuickBackstoryIdeas = (
+    char?: CharacterCard,
+    world?: Lorebook
+  ): string[] => {
+    const charName = char?.name || 'the character';
+    const attire = char?.appearance?.default_attire?.trim();
+    const attireSuffix = attire ? `, wearing ${attire}` : '';
+    if (world && world.entries.length > 0) {
+      const enabledEntries = world.entries.filter((e) => e.enabled !== false);
+      const loc1 = enabledEntries.find((e) => e.category === 'location') || enabledEntries[0];
+      const other1 = enabledEntries.find((e) => e.id !== loc1?.id);
+      const ideas: string[] = [];
+      if (loc1) {
+        ideas.push(
+          `${charName} standing inside ${loc1.title} in ${world.name}, dramatic atmospheric lighting${attireSuffix}`
+        );
+      }
+      if (other1) {
+        ideas.push(
+          `${charName} investigating ${other1.title} across ${world.name}, cinematic wide shot`
+        );
+      }
+      if (char?.scenario) {
+        const cleanScenario = char.scenario
+          .replace(/\{\{char\}\}/gi, charName)
+          .replace(/\{\{user\}\}/gi, activeSession?.user_persona_name || 'the traveler')
+          .slice(0, 110);
+        ideas.push(cleanScenario);
+      }
+      ideas.push(
+        `Close-up expressive portrait of ${charName} (${char?.title || world.name}), dramatic rim lighting${attireSuffix}`
+      );
+      return ideas.slice(0, 4);
+    }
+    return [
+      `${charName} standing in a dramatic environment, cinematic lighting${attireSuffix}`,
+      `Close-up expressive portrait of ${charName}${char?.title ? `, ${char.title}` : ''}, detailed concept art`,
+      `${charName} in a quiet reflective moment, moody atmospheric lighting`,
+      `Dynamic mid-motion action shot of ${charName}, crisp detail`,
+    ];
+  };
+
+  const quickBackstoryIdeas = buildQuickBackstoryIdeas(activeCharacter, activeWorld);
+
+  useEffect(() => {
+    const firstIdea = buildQuickBackstoryIdeas(activeCharacter, activeWorld)[0] || '';
+    setBackstoryPrompt(firstIdea);
+  }, [activeChatId, activeCharacter?.id, activeWorld?.id]);
 
   return (
     <div className="relative grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
@@ -1491,16 +1531,36 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
               {(
                 [
                   ['section', 'World & Scenario (Stable)'],
-                  ['location', 'Location', 'e.g. Solana Cove beach, candlelit cabana'],
-                  ['time_and_lighting', 'Time & Lighting', 'e.g. golden hour sunset, moonlit night'],
-                  ['weather', 'Weather', 'e.g. clear warm breeze, tropical rainstorm'],
-                  ['atmosphere', 'Atmosphere', 'e.g. tranquil resort dusk, intimate secrecy'],
+                  [
+                    'location',
+                    'Location',
+                    activeWorld?.entries?.[0]?.title
+                      ? `e.g. ${activeWorld.entries[0].title}`
+                      : activeWorld?.name
+                      ? `e.g. ${activeWorld.name}`
+                      : 'e.g. Current location or setting',
+                  ],
+                  ['time_and_lighting', 'Time & Lighting', 'e.g. midnight neon glow, candlelit dusk, overcast noon'],
+                  ['weather', 'Weather', 'e.g. heavy rain, misty fog, clear night'],
+                  ['atmosphere', 'Atmosphere', 'e.g. tense secrecy, quiet intrigue, solemn'],
                   ['section', 'Character Visuals (Turn-by-Turn)'],
-                  ['attire', 'Attire / State of Undress', 'e.g. string bikini, completely nude, silk dress'],
-                  ['hairstyle', 'Hairstyle', 'e.g. wet slicked-back hair, loose tousled hair'],
-                  ['makeup', 'Makeup', 'e.g. natural bare-faced, smoky evening makeup'],
-                  ['skin_and_condition', 'Skin & Condition', 'e.g. wet glistening skin, sun-kissed dry skin'],
-                  ['pose_and_action', 'Pose & Action', 'e.g. walking away along shoreline'],
+                  [
+                    'attire',
+                    'Attire / State of Undress',
+                    activeCharacter?.appearance?.default_attire
+                      ? `e.g. ${activeCharacter.appearance.default_attire}`
+                      : 'e.g. Current outfit or attire',
+                  ],
+                  [
+                    'hairstyle',
+                    'Hairstyle',
+                    activeCharacter?.appearance?.hair_style
+                      ? `e.g. ${activeCharacter.appearance.hair_style}`
+                      : 'e.g. Current hairstyle',
+                  ],
+                  ['makeup', 'Makeup', 'e.g. natural, dramatic, subtle'],
+                  ['skin_and_condition', 'Skin & Condition', 'e.g. rain-dampened, flushed, calm'],
+                  ['pose_and_action', 'Pose & Action', 'e.g. leaning against the workbench, glancing back'],
                 ] as const
               ).map((entry, idx) => {
                 if (entry[0] === 'section') {

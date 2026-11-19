@@ -1582,3 +1582,55 @@ def test_system_prompt_enforces_gender_pronouns_and_appearance() -> None:
     assert "Never misgender Kaelen Voss" in prompt
     assert "Dark chestnut hair" in prompt
     assert "Emerald green eyes" in prompt
+
+
+def test_create_chat_seeds_scene_state_from_character_and_world() -> None:
+    import backend.main as main_mod
+
+    client = TestClient(main_mod.app)
+    world_resp = client.post(
+        "/api/worlds",
+        json={
+            "name": "Neo-Veridia Test",
+            "entries": [
+                {
+                    "title": "Sector 9 Vaults",
+                    "keys": ["vaults"],
+                    "category": "location",
+                    "content": "Subterranean neon data vault.",
+                }
+            ],
+        },
+    )
+    assert world_resp.status_code == 200
+    world_id = world_resp.json()["id"]
+
+    char_resp = client.post(
+        "/api/characters?auto_generate_avatar=false",
+        json={
+            "name": "Kaelen Test",
+            "world_id": world_id,
+            "appearance": {
+                "hair_color": "Dark chestnut",
+                "hair_style": "Long wavy",
+                "default_attire": "High-collared leather jacket",
+            },
+        },
+    )
+    assert char_resp.status_code == 200
+    char_id = char_resp.json()["id"]
+
+    chat_resp = client.post(
+        "/api/chats",
+        json={"character_id": char_id, "world_id": world_id},
+    )
+    assert chat_resp.status_code == 200
+    sc = chat_resp.json()["scene_state"]
+    assert sc["location"] == "Sector 9 Vaults"
+    assert sc["attire"] == "High-collared leather jacket"
+    assert sc["hairstyle"] == "Dark chestnut Long wavy"
+
+    # Cleanup
+    client.delete(f"/api/chats/{chat_resp.json()['id']}")
+    client.delete(f"/api/characters/{char_id}")
+    client.delete(f"/api/worlds/{world_id}")
