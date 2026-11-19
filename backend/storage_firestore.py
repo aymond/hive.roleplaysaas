@@ -121,11 +121,11 @@ class FirestoreStorage(StudioStorage):
     MAX_CACHED_TENANTS = 64
 
     def __init__(self) -> None:
-        super().__init__()
         from google.cloud import firestore  # type: ignore[import-not-found]
 
         self._db = firestore.Client(project=os.getenv("GCP_PROJECT_ID") or None)
         self._tenant_cache: OrderedDict[str, FirestoreTenantWorkspace] = OrderedDict()
+        super().__init__()
         self._load_global_configs()
 
     def _load_global_configs(self) -> None:
