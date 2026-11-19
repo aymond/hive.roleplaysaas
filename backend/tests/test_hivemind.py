@@ -1496,3 +1496,22 @@ def test_admin_user_management_and_server_assigned_roles(monkeypatch) -> None:
     finally:
         main_mod.storage.delete_user("charlie-test")
         main_mod.storage.delete_user("local-owner")
+
+
+def test_per_tenant_rate_limiter() -> None:
+    from backend.rate_limit import _BUCKETS, enforce_rate_limit
+
+    _BUCKETS.clear()
+    try:
+        enforce_rate_limit("rate-user-a", "unit_test", limit=2, window_seconds=60.0)
+        enforce_rate_limit("rate-user-a", "unit_test", limit=2, window_seconds=60.0)
+        try:
+            enforce_rate_limit("rate-user-a", "unit_test", limit=2, window_seconds=60.0)
+            assert False, "Expected HTTPException 429 on 3rd request"
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 429
+
+        # Separate tenant has an independent quota
+        enforce_rate_limit("rate-user-b", "unit_test", limit=2, window_seconds=60.0)
+    finally:
+        _BUCKETS.clear()

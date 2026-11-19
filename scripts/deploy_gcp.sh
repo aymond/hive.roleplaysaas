@@ -48,10 +48,24 @@ echo "==> 6. Building & pushing Docker image via Cloud Build: ${IMAGE_URI}"
 gcloud builds submit --tag "${IMAGE_URI}" .
 
 echo "==> 7. Applying full Terraform infrastructure (Cloud Run, Firestore, GCS, Identity Platform, Secret Manager)"
-terraform -chdir=infra apply -auto-approve \
-  -var="project_id=${PROJECT_ID}" \
-  -var="region=${REGION}" \
+TF_ARGS=(
+  -var="project_id=${PROJECT_ID}"
+  -var="region=${REGION}"
   -var="container_image=${IMAGE_URI}"
+)
+[[ -n "${ADMIN_EMAILS:-}" ]] && TF_ARGS+=(-var="admin_emails=${ADMIN_EMAILS}")
+[[ -n "${FIREBASE_WEB_API_KEY:-}" ]] && TF_ARGS+=(-var="firebase_web_api_key=${FIREBASE_WEB_API_KEY}")
+[[ -n "${ALLOWED_ORIGINS:-}" ]] && TF_ARGS+=(-var="allowed_origins=${ALLOWED_ORIGINS}")
+[[ -n "${AUTH_PROVIDERS:-}" ]] && TF_ARGS+=(-var="auth_providers=${AUTH_PROVIDERS}")
+
+terraform -chdir=infra apply -auto-approve "${TF_ARGS[@]}"
+
+if command -v firebase >/dev/null 2>&1; then
+  echo "==> 8. Deploying frontend to Firebase Hosting"
+  firebase deploy --only hosting --project "${PROJECT_ID}"
+else
+  echo "==> Note: Install firebase-tools and run 'firebase deploy --only hosting --project ${PROJECT_ID}' to publish the Hosting CDN."
+fi
 
 echo "==> Deployment infrastructure ready!"
 terraform -chdir=infra output

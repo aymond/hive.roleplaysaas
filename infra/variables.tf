@@ -61,3 +61,33 @@ variable "media_retention_days" {
   type        = number
   default     = 90
 }
+
+variable "firebase_web_api_key" {
+  description = "Public Firebase / Identity Platform Web API key for frontend OAuth & email login"
+  type        = string
+  default     = ""
+}
+
+variable "firebase_auth_domain" {
+  description = "Firebase Auth domain (defaults to <project_id>.firebaseapp.com if empty)"
+  type        = string
+  default     = ""
+}
+
+variable "admin_emails" {
+  description = "Comma-separated list of administrator email addresses bootstrapped on first login"
+  type        = string
+  default     = ""
+}
+
+variable "auth_providers" {
+  description = "Comma-separated OAuth providers shown on the login screen (google,apple,github,instagram)"
+  type        = string
+  default     = "google"
+}
+
+variable "rate_limit_per_minute" {
+  description = "Per-tenant sliding-window rate limit for LLM and image generation endpoints"
+  type        = number
+  default     = 30
+}

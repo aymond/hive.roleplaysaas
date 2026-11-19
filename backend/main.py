@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -62,6 +62,7 @@ from .auth import (
 from .billing import router as billing_router
 from .media_gcs import download_user_media, is_gcs_enabled
 from .moderation import enforce_moderation_or_422, scan_for_trigger_words
+from .rate_limit import enforce_rate_limit
 from .storage import StudioStorage
 from .tavern_card import (
     character_to_tavern_v2_dict,
@@ -518,6 +519,7 @@ async def generate_character_profile_endpoint(
     req: GenerateCharacterProfileRequest,
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
+    enforce_rate_limit(user.uid, "inference")
     if not any([req.brief.strip(), req.name.strip(), req.title.strip(), req.race_origins.strip(), req.appearance.strip()]):
         raise HTTPException(status_code=400, detail="Please enter at least a brief description, title, origins, or appearance")
     if storage.config.sfw_mode:
@@ -605,6 +607,7 @@ async def generate_character_avatar(
     seed: int | None = None,
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
+    enforce_rate_limit(user.uid, "inference")
     ws = storage.for_user(user.uid)
     card = ws.characters.get(char_id)
     if not card:
@@ -1241,6 +1244,7 @@ async def send_chat_message(
     req: SendMessageRequest,
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
+    enforce_rate_limit(user.uid, "inference")
     ws = storage.for_user(user.uid)
     session = ws.chats.get(chat_id)
     if not session:
@@ -1415,6 +1419,7 @@ async def stream_chat_message(
     req: SendMessageRequest,
     user: AuthenticatedUser = Depends(get_current_user),
 ):
+    enforce_rate_limit(user.uid, "inference")
     ws = storage.for_user(user.uid)
     session = ws.chats.get(chat_id)
     if not session:
@@ -1967,6 +1972,7 @@ async def generate_backstory_grounded_image(
     Generates a standalone image grounded in the roleplay's character persona,
     physical description, scenario backstory, and world lorebook without adding a chat turn.
     """
+    enforce_rate_limit(user.uid, "inference")
     ws = storage.for_user(user.uid)
     t_studio_start = time.perf_counter()
     session = ws.chats.get(req.chat_id) if req.chat_id else None
@@ -2161,3 +2167,22 @@ async def generate_backstory_grounded_image(
         "llm_provider": llm_provider_used,
         "timings": studio_timings,
     }
+
+
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if (_FRONTEND_DIST / "index.html").exists():
+    if (_FRONTEND_DIST / "assets").exists():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(_FRONTEND_DIST / "assets")),
+            name="frontend_assets",
+        )
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_fallback(full_path: str) -> Response:
+        if full_path.startswith("api/") or full_path.startswith("media/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = _FRONTEND_DIST / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(_FRONTEND_DIST / "index.html"))

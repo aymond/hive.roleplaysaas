@@ -199,6 +199,26 @@ resource "google_cloud_run_v2_service" "api" {
         value = "true"
       }
       env {
+        name  = "FIREBASE_WEB_API_KEY"
+        value = var.firebase_web_api_key
+      }
+      env {
+        name  = "FIREBASE_AUTH_DOMAIN"
+        value = var.firebase_auth_domain != "" ? var.firebase_auth_domain : "${var.project_id}.firebaseapp.com"
+      }
+      env {
+        name  = "ADMIN_EMAILS"
+        value = var.admin_emails
+      }
+      env {
+        name  = "AUTH_PROVIDERS"
+        value = var.auth_providers
+      }
+      env {
+        name  = "RATE_LIMIT_PER_MINUTE"
+        value = tostring(var.rate_limit_per_minute)
+      }
+      env {
         name  = "GCP_PROJECT_ID"
         value = var.project_id
       }
