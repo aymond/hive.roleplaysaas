@@ -1,3 +1,16 @@
+export interface CharacterAppearance {
+  species_race: string;
+  age_apparent: string;
+  gender_presentation: string;
+  skin_color: string;
+  hair_color: string;
+  hair_style: string;
+  eye_color: string;
+  body_build: string;
+  facial_features: string;
+  default_attire: string;
+}
+
 export interface CharacterCard {
   id: string;
   name: string;
@@ -11,6 +24,7 @@ export interface CharacterCard {
   post_history_instructions: string;
   creator_notes: string;
   tags: string[];
+  appearance?: CharacterAppearance;
   visual_prompt_tags: string;
   negative_prompt_tags: string;
   avatar_url: string;

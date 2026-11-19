@@ -14,8 +14,21 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../api';
-import type { CharacterCard, Lorebook } from '../types';
+import type { CharacterAppearance, CharacterCard, Lorebook } from '../types';
 import { GenerationProgressCard } from './GenerationFeedback';
+
+const EMPTY_APPEARANCE: CharacterAppearance = {
+  species_race: '',
+  age_apparent: '',
+  gender_presentation: '',
+  skin_color: '',
+  hair_color: '',
+  hair_style: '',
+  eye_color: '',
+  body_build: '',
+  facial_features: '',
+  default_attire: '',
+};
 
 interface CharacterForgeProps {
   characters: CharacterCard[];
@@ -82,6 +95,53 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
     }
     setDraft({ ...draft, tags: nextTags });
     setTagInput('');
+  };
+
+  const appearance = draft?.appearance || EMPTY_APPEARANCE;
+
+  const updateAppearanceField = (
+    field: keyof CharacterAppearance,
+    value: string
+  ) => {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      appearance: {
+        ...EMPTY_APPEARANCE,
+        ...(draft.appearance || {}),
+        [field]: value,
+      },
+    });
+  };
+
+  const syncAppearanceToVisualTags = () => {
+    if (!draft) return;
+    const ap = draft.appearance || EMPTY_APPEARANCE;
+    const parts: string[] = [];
+    if (ap.gender_presentation.trim()) parts.push(ap.gender_presentation.trim());
+    if (ap.age_apparent.trim()) parts.push(ap.age_apparent.trim());
+    if (ap.species_race.trim()) parts.push(ap.species_race.trim());
+    if (ap.skin_color.trim()) parts.push(`${ap.skin_color.trim()} skin`);
+    if (ap.hair_color.trim() && ap.hair_style.trim()) {
+      parts.push(`${ap.hair_color.trim()} ${ap.hair_style.trim()} hair`);
+    } else if (ap.hair_color.trim()) {
+      parts.push(`${ap.hair_color.trim()} hair`);
+    } else if (ap.hair_style.trim()) {
+      parts.push(`${ap.hair_style.trim()} hair`);
+    }
+    if (ap.eye_color.trim()) parts.push(`${ap.eye_color.trim()} eyes`);
+    if (ap.body_build.trim()) parts.push(`${ap.body_build.trim()} build`);
+    if (ap.facial_features.trim()) parts.push(ap.facial_features.trim());
+    if (ap.default_attire.trim()) parts.push(`wearing ${ap.default_attire.trim()}`);
+    if (parts.length === 0) return;
+
+    const existing = draft.visual_prompt_tags
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const seen = new Set(existing.map((s) => s.toLowerCase()));
+    const merged = [...parts.filter((p) => !seen.has(p.toLowerCase())), ...existing];
+    setDraft({ ...draft, visual_prompt_tags: merged.join(', ') });
   };
 
   const openCreateFlow = () => {
@@ -812,6 +872,206 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Advanced Fine-Grained Appearance Controls */}
+            <details className="bg-[#111520] p-4 rounded-2xl border border-amber-500/20">
+              <summary className="text-xs font-semibold text-amber-300 cursor-pointer flex items-center justify-between gap-2">
+                <span>Advanced Appearance Features (Hair, Skin, Eyes, Build &amp; Attire)</span>
+                <span className="text-[11px] font-normal text-slate-400">
+                  Automatically applied to portraits
+                </span>
+              </summary>
+
+              <div className="mt-4 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Hair Colour
+                    </label>
+                    <input
+                      type="text"
+                      list="hm-hair-colors"
+                      value={appearance.hair_color}
+                      onChange={(e) => updateAppearanceField('hair_color', e.target.value)}
+                      placeholder="e.g. Silver-white, Chestnut, Raven black"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Hair Style
+                    </label>
+                    <input
+                      type="text"
+                      list="hm-hair-styles"
+                      value={appearance.hair_style}
+                      onChange={(e) => updateAppearanceField('hair_style', e.target.value)}
+                      placeholder="e.g. Long wavy, Tousled bob, Braided updo"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Eye Colour
+                    </label>
+                    <input
+                      type="text"
+                      list="hm-eye-colors"
+                      value={appearance.eye_color}
+                      onChange={(e) => updateAppearanceField('eye_color', e.target.value)}
+                      placeholder="e.g. Emerald green, Amber gold, Ice blue"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Skin Colour / Tone
+                    </label>
+                    <input
+                      type="text"
+                      list="hm-skin-tones"
+                      value={appearance.skin_color}
+                      onChange={(e) => updateAppearanceField('skin_color', e.target.value)}
+                      placeholder="e.g. Fair porcelain, Warm olive, Deep espresso"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Body Build / Height
+                    </label>
+                    <input
+                      type="text"
+                      list="hm-body-builds"
+                      value={appearance.body_build}
+                      onChange={(e) => updateAppearanceField('body_build', e.target.value)}
+                      placeholder="e.g. Tall athletic, Slender, Broad-shouldered"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Species / Race
+                    </label>
+                    <input
+                      type="text"
+                      value={appearance.species_race}
+                      onChange={(e) => updateAppearanceField('species_race', e.target.value)}
+                      placeholder="e.g. Human, Half-Elf, Android"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Apparent Age
+                    </label>
+                    <input
+                      type="text"
+                      value={appearance.age_apparent}
+                      onChange={(e) => updateAppearanceField('age_apparent', e.target.value)}
+                      placeholder="e.g. Mid-20s, Late 30s, Ageless"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Gender Presentation
+                    </label>
+                    <input
+                      type="text"
+                      value={appearance.gender_presentation}
+                      onChange={(e) => updateAppearanceField('gender_presentation', e.target.value)}
+                      placeholder="e.g. Woman, Man, Androgynous"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Facial Features
+                    </label>
+                    <input
+                      type="text"
+                      value={appearance.facial_features}
+                      onChange={(e) => updateAppearanceField('facial_features', e.target.value)}
+                      placeholder="e.g. Freckles, sharp jawline, faint brow scar"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div className="flex-1">
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Default Attire / Outfit
+                    </label>
+                    <input
+                      type="text"
+                      value={appearance.default_attire}
+                      onChange={(e) => updateAppearanceField('default_attire', e.target.value)}
+                      placeholder="e.g. Weathered charcoal trench coat, high-collared linen shirt"
+                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={syncAppearanceToVisualTags}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    Sync to Visual Prompt Tags
+                  </button>
+                </div>
+
+                <datalist id="hm-hair-colors">
+                  <option value="Raven black" />
+                  <option value="Dark chestnut" />
+                  <option value="Copper red" />
+                  <option value="Honey blonde" />
+                  <option value="Platinum blonde" />
+                  <option value="Silver-white" />
+                </datalist>
+                <datalist id="hm-hair-styles">
+                  <option value="Long wavy" />
+                  <option value="Tousled shoulder-length" />
+                  <option value="Short cropped" />
+                  <option value="Braided updo" />
+                  <option value="High ponytail" />
+                  <option value="Sleek bob" />
+                </datalist>
+                <datalist id="hm-eye-colors">
+                  <option value="Emerald green" />
+                  <option value="Amber gold" />
+                  <option value="Ice blue" />
+                  <option value="Warm hazel" />
+                  <option value="Dark obsidian" />
+                  <option value="Violet" />
+                </datalist>
+                <datalist id="hm-skin-tones">
+                  <option value="Fair porcelain" />
+                  <option value="Sun-kissed tan" />
+                  <option value="Warm olive" />
+                  <option value="Rich bronze" />
+                  <option value="Deep espresso" />
+                  <option value="Pale alabaster" />
+                </datalist>
+                <datalist id="hm-body-builds">
+                  <option value="Tall athletic" />
+                  <option value="Slender lithe" />
+                  <option value="Broad-shouldered muscular" />
+                  <option value="Curvy" />
+                  <option value="Compact agile" />
+                </datalist>
+              </div>
+            </details>
 
             {/* Core Character Persona Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

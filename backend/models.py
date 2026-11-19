@@ -15,6 +15,45 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:10]}"
 
 
+class CharacterAppearance(BaseModel):
+    species_race: str = ""
+    age_apparent: str = ""
+    gender_presentation: str = ""
+    skin_color: str = ""
+    hair_color: str = ""
+    hair_style: str = ""
+    eye_color: str = ""
+    body_build: str = ""
+    facial_features: str = ""
+    default_attire: str = ""
+
+    def to_visual_tags(self) -> list[str]:
+        parts: list[str] = []
+        if self.gender_presentation.strip():
+            parts.append(self.gender_presentation.strip())
+        if self.age_apparent.strip():
+            parts.append(self.age_apparent.strip())
+        if self.species_race.strip():
+            parts.append(self.species_race.strip())
+        if self.skin_color.strip():
+            parts.append(f"{self.skin_color.strip()} skin")
+        if self.hair_color.strip() and self.hair_style.strip():
+            parts.append(f"{self.hair_color.strip()} {self.hair_style.strip()} hair")
+        elif self.hair_color.strip():
+            parts.append(f"{self.hair_color.strip()} hair")
+        elif self.hair_style.strip():
+            parts.append(f"{self.hair_style.strip()} hair")
+        if self.eye_color.strip():
+            parts.append(f"{self.eye_color.strip()} eyes")
+        if self.body_build.strip():
+            parts.append(f"{self.body_build.strip()} build")
+        if self.facial_features.strip():
+            parts.append(self.facial_features.strip())
+        if self.default_attire.strip():
+            parts.append(f"wearing {self.default_attire.strip()}")
+        return parts
+
+
 class CharacterCard(BaseModel):
     id: str = Field(default_factory=lambda: new_id("char"))
     name: str
@@ -28,6 +67,7 @@ class CharacterCard(BaseModel):
     post_history_instructions: str = ""
     creator_notes: str = ""
     tags: list[str] = Field(default_factory=list)
+    appearance: CharacterAppearance = Field(default_factory=CharacterAppearance)
     visual_prompt_tags: str = ""
     negative_prompt_tags: str = "blurry, low quality, deformed, watermark"
     avatar_url: str = ""

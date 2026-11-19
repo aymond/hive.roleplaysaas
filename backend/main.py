@@ -641,11 +641,13 @@ async def generate_character_avatar(
     if card.world_id and card.world_id in ws.worlds:
         world_style = ws.worlds[card.world_id].aesthetic_style
 
+    appearance_tags = card.appearance.to_visual_tags() if getattr(card, "appearance", None) else []
     base_tags = card.visual_prompt_tags or f"portrait of {card.name}, {card.title}, {card.personality}"
+    combined_traits = ", ".join([*appearance_tags, base_tags]) if appearance_tags else base_tags
     portrait_parts = render_prompt_template(
         storage.config.portrait_prompt_template,
         {
-            "character_traits": base_tags,
+            "character_traits": combined_traits,
             "world_style": world_style,
             "portrait_style": "masterpiece character portrait, 8k",
         },
