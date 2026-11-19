@@ -122,6 +122,30 @@ resource "google_secret_manager_secret" "runpod_api_key" {
   depends_on = [google_project_service.apis]
 }
 
+resource "google_secret_manager_secret_version" "stripe_secret_key_init" {
+  secret      = google_secret_manager_secret.stripe_secret_key.id
+  secret_data = " "
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
+resource "google_secret_manager_secret_version" "stripe_webhook_secret_init" {
+  secret      = google_secret_manager_secret.stripe_webhook_secret.id
+  secret_data = " "
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
+resource "google_secret_manager_secret_version" "runpod_api_key_init" {
+  secret      = google_secret_manager_secret.runpod_api_key.id
+  secret_data = " "
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
 resource "google_secret_manager_secret_iam_member" "secret_access" {
   for_each = {
     stripe_key     = google_secret_manager_secret.stripe_secret_key.secret_id
@@ -285,6 +309,9 @@ resource "google_cloud_run_v2_service" "api" {
     google_project_service.apis,
     google_firestore_database.default,
     google_secret_manager_secret_iam_member.secret_access,
+    google_secret_manager_secret_version.stripe_secret_key_init,
+    google_secret_manager_secret_version.stripe_webhook_secret_init,
+    google_secret_manager_secret_version.runpod_api_key_init,
   ]
 }
 
