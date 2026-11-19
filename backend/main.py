@@ -291,11 +291,14 @@ class BackstoryImageRequest(BaseModel):
 @app.get("/api/auth/config")
 async def get_auth_config() -> dict[str, Any]:
     """Public client auth configuration for the login challenge screen."""
+    raw_providers = os.getenv("AUTH_PROVIDERS", "google").strip()
+    enabled_providers = [p.strip().lower() for p in raw_providers.split(",") if p.strip()]
     return {
         "saas_auth_enabled": SAAS_AUTH_ENABLED,
         "firebase_api_key": os.getenv("FIREBASE_WEB_API_KEY", "").strip(),
         "firebase_auth_domain": os.getenv("FIREBASE_AUTH_DOMAIN", "").strip(),
         "firebase_project_id": os.getenv("GCP_PROJECT_ID", "").strip(),
+        "enabled_providers": enabled_providers,
     }
 
 

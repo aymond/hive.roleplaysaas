@@ -303,6 +303,7 @@ export interface AuthConfig {
   firebase_api_key: string;
   firebase_auth_domain: string;
   firebase_project_id: string;
+  enabled_providers?: string[];
 }
 
 export interface UserProfile {
