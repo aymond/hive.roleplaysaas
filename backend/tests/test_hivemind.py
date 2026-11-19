@@ -1561,3 +1561,24 @@ def test_semantic_slot_dedup_and_nightgown_attire_override() -> None:
     assert "beautiful" not in joined
     assert "leather jacket" not in joined
     assert "sheer nightgown" in joined
+
+
+def test_system_prompt_enforces_gender_pronouns_and_appearance() -> None:
+    from backend.models import CharacterAppearance
+
+    card = CharacterCard(
+        id="char_pronoun_test",
+        name="Kaelen Voss",
+        title="Mnemonic Broker",
+        description="{{char}} runs a parlor.",
+        appearance=CharacterAppearance(
+            gender_presentation="Woman",
+            hair_color="Dark chestnut",
+            eye_color="Emerald green",
+        ),
+    )
+    prompt = build_tavern_system_prompt(card, lore_context="")
+    assert "she/her/hers pronouns" in prompt
+    assert "Never misgender Kaelen Voss" in prompt
+    assert "Dark chestnut hair" in prompt
+    assert "Emerald green eyes" in prompt

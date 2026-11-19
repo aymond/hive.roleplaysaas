@@ -59,6 +59,31 @@ def build_tavern_system_prompt(
         )
 
     parts.append(f"### Character Persona: {character.name} ({character.title})")
+
+    # Resolve gender, pronouns, and structured physical appearance
+    ap = getattr(character, "appearance", None)
+    gender_raw = (getattr(ap, "gender_presentation", "") or "").strip()
+    if not gender_raw and character.visual_prompt_tags:
+        vt_tokens = {t.strip().lower() for t in character.visual_prompt_tags.split(",")}
+        if vt_tokens & {"woman", "female", "1girl", "girl"}:
+            gender_raw = "Woman"
+        elif vt_tokens & {"man", "male", "1boy", "boy"}:
+            gender_raw = "Man"
+
+    gender_l = gender_raw.lower()
+    pronoun_rule = ""
+    if any(k in gender_l for k in ("woman", "female", "girl", "lady", "she")):
+        pronoun_rule = f"Always refer to {character.name} using she/her/hers pronouns ({gender_raw})."
+    elif any(k in gender_l for k in ("man", "male", "boy", "gentleman", "he")):
+        pronoun_rule = f"Always refer to {character.name} using he/him/his pronouns ({gender_raw})."
+    elif any(k in gender_l for k in ("non-binary", "nonbinary", "androgynous", "they")):
+        pronoun_rule = f"Always refer to {character.name} using they/them/theirs pronouns ({gender_raw})."
+
+    if ap:
+        ap_tags = ap.to_visual_tags()
+        if ap_tags:
+            parts.append(f"Physical Appearance: {', '.join(ap_tags)}")
+
     if character.description:
         parts.append(replace_tavern_macros(character.description, character.name, user_name))
     if character.personality:
@@ -84,7 +109,8 @@ def build_tavern_system_prompt(
 
     parts.append(
         f"### Roleplay Rules (Strict):\n"
-        f"- Stay strictly in consistent third-person limited perspective focused on {character.name}; "
+        + (f"- {pronoun_rule} Never misgender {character.name}.\n" if pronoun_rule else "")
+        + f"- Stay strictly in consistent third-person limited perspective focused on {character.name}; "
         f"do NOT switch to first-person \"I\" for {user_name} and do NOT write {user_name}'s dialogue, thoughts, or actions.\n"
         f"- Keep your reply grounded, coherent, and concise (1 to 3 paragraphs, ~80-180 words). "
         f"Stop cleanly at the end of the beat—never emit unpunctuated word lists or trailing repetition."
