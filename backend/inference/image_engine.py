@@ -998,27 +998,58 @@ async def _run_vertex_imagen(
     height: int,
     model_override: str | None = None,
 ) -> tuple[bytes | None, str]:
-    """Configurable Vertex AI Imagen provider (uses GCP ADC)."""
+    """Configurable Vertex AI image provider (supports Gemini native image & Imagen via GCP ADC)."""
     project_id = (getattr(config, "vertex_project_id", "") or os.getenv("GCP_PROJECT_ID", "")).strip()
     location = (getattr(config, "vertex_location", "europe-west4") or os.getenv("GCP_REGION", "europe-west4")).strip()
     model_id = (
         (model_override or "").strip()
-        or (getattr(config, "vertex_imagen_model", "imagen-3.0-generate-002") or "imagen-3.0-generate-002").strip()
+        or (getattr(config, "vertex_imagen_model", "gemini-3.1-flash-lite-image") or "gemini-3.1-flash-lite-image").strip()
     )
     if not project_id:
-        logger.warning("⚠️ VERTEX⏭  | vertex_project_id not configured — skipping Vertex Imagen")
+        logger.warning("⚠️ VERTEX⏭  | vertex_project_id not configured — skipping Vertex image")
         return None, ""
     try:
         import base64
         from ..gcp_http import get_gcp_access_token, get_shared_http_client
 
         token = await get_gcp_access_token()
+        client = get_shared_http_client(timeout=60.0)
+
+        if model_id.startswith("gemini-"):
+            # Gemini native image models (e.g. gemini-3.1-flash-lite-image) are served on the global endpoint
+            gemini_loc = "global"
+            url = (
+                f"https://aiplatform.googleapis.com/v1/projects/{project_id}"
+                f"/locations/{gemini_loc}/publishers/google/models/{model_id}:generateContent"
+            )
+            aspect_hint = "portrait 3:4" if height > width else ("landscape 4:3" if width > height else "square 1:1")
+            full_text = f"{prompt} ({aspect_hint})"
+            if negative_prompt and negative_prompt.strip():
+                full_text += f"\nAvoid: {negative_prompt.strip()}"
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": full_text}]}],
+                    "generationConfig": {"responseModalities": ["IMAGE"]},
+                },
+            )
+            if resp.status_code == 200:
+                for cand in resp.json().get("candidates", []):
+                    for part in cand.get("content", {}).get("parts", []):
+                        inline = part.get("inlineData") or {}
+                        b64_data = inline.get("data")
+                        if b64_data:
+                            return base64.b64decode(b64_data), f"vertex_gemini_image ({model_id})"
+            logger.warning("⚠️ VERTEX   | status=%d body=%s", resp.status_code, resp.text[:200])
+            return None, ""
+
         aspect = "4:3" if width > height else ("3:4" if height > width else "1:1")
+        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
         url = (
-            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}"
+            f"https://{host}/v1/projects/{project_id}"
             f"/locations/{location}/publishers/google/models/{model_id}:predict"
         )
-        client = get_shared_http_client(timeout=60.0)
         resp = await client.post(
             url,
             headers={"Authorization": f"Bearer {token}"},
@@ -1039,7 +1070,7 @@ async def _run_vertex_imagen(
                 return base64.b64decode(preds[0]["bytesBase64Encoded"]), f"vertex_imagen ({model_id})"
         logger.warning("⚠️ VERTEX   | status=%d body=%s", resp.status_code, resp.text[:200])
     except Exception as exc:
-        logger.warning("⚠️ VERTEX   | Vertex Imagen call failed: %s", exc)
+        logger.warning("⚠️ VERTEX   | Vertex image call failed: %s", exc)
     return None, ""
 
 

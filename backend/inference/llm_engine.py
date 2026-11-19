@@ -291,8 +291,9 @@ async def _call_vertex_gemini_chat(
         if system_parts:
             payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
 
+        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
         url = (
-            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}"
+            f"https://{host}/v1/projects/{project_id}"
             f"/locations/{location}/publishers/google/models/{model_id}:generateContent"
         )
         client = get_shared_http_client(timeout=60.0)
@@ -456,8 +457,9 @@ async def stream_roleplay_reply(
             },
             "systemInstruction": {"parts": [{"text": sys_prompt}]},
         }
+        host = "aiplatform.googleapis.com" if location == "global" else f"{location}-aiplatform.googleapis.com"
         url = (
-            f"https://{location}-aiplatform.googleapis.com/v1/projects/{vertex_project}"
+            f"https://{host}/v1/projects/{vertex_project}"
             f"/locations/{location}/publishers/google/models/{model_id}:streamGenerateContent?alt=sse"
         )
         provider_label = f"vertex_gemini ({model_id})"

@@ -230,7 +230,7 @@ class InferenceConfig(BaseModel):
     vertex_project_id: str = Field(default_factory=lambda: os.getenv("GCP_PROJECT_ID", ""))
     vertex_location: str = Field(default_factory=lambda: os.getenv("GCP_REGION", "europe-west4"))
     vertex_imagen_model: str = Field(
-        default_factory=lambda: os.getenv("VERTEX_IMAGEN_MODEL", "imagen-3.0-generate-002")
+        default_factory=lambda: os.getenv("VERTEX_IMAGEN_MODEL", "gemini-3.1-flash-lite-image")
     )
     runpod_endpoint_id: str = Field(default_factory=lambda: os.getenv("RUNPOD_ENDPOINT_ID", ""))
     runpod_api_key: str = Field(default_factory=lambda: os.getenv("RUNPOD_API_KEY", ""))
