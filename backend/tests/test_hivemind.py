@@ -1515,3 +1515,27 @@ def test_per_tenant_rate_limiter() -> None:
         enforce_rate_limit("rate-user-b", "unit_test", limit=2, window_seconds=60.0)
     finally:
         _BUCKETS.clear()
+
+
+def test_portrait_failure_does_not_pollute_gallery(monkeypatch) -> None:
+    import backend.main as main_mod
+
+    client = TestClient(main_mod.app)
+    orig_provider = main_mod.storage.config.image_provider
+    orig_project = main_mod.storage.config.vertex_project_id
+    try:
+        main_mod.storage.config.image_provider = "vertex_imagen"
+        main_mod.storage.config.vertex_project_id = ""
+        monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+
+        chars = client.get("/api/characters").json()
+        target_id = chars[0]["id"]
+        before_gallery_len = len(client.get("/api/gallery").json())
+
+        resp = client.post(f"/api/characters/{target_id}/generate-avatar")
+        assert resp.status_code == 502
+        after_gallery_len = len(client.get("/api/gallery").json())
+        assert after_gallery_len == before_gallery_len
+    finally:
+        main_mod.storage.config.image_provider = orig_provider
+        main_mod.storage.config.vertex_project_id = orig_project

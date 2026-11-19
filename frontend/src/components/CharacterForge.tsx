@@ -37,6 +37,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   const [saving, setSaving] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
   const [generatingAvatar, setGeneratingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -54,6 +55,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
     setIsCreating(false);
     setMobileListOpen(false);
     setCreateError(null);
+    setAvatarError(null);
     setSelectedId(card.id);
     setDraft({ ...card });
   };
@@ -198,6 +200,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   const handleGenerateAvatar = async () => {
     if (!draft || generatingAvatar) return;
     setGeneratingAvatar(true);
+    setAvatarError(null);
     try {
       await api.updateCharacter(draft.id, draft);
       const res = await api.generateCharacterAvatar(draft.id);
@@ -205,6 +208,15 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
       onCharactersUpdated(nextList);
       setDraft({ ...res.character });
       onGalleryUpdated();
+    } catch (err: any) {
+      let msg = err?.message || 'Portrait generation failed';
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed?.detail) msg = parsed.detail;
+      } catch {
+        // use raw message
+      }
+      setAvatarError(msg);
     } finally {
       setGeneratingAvatar(false);
     }
@@ -655,6 +667,11 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
                   <Wand2 className="w-3.5 h-3.5 text-amber-400" />
                   {generatingProfile ? 'Generating Profile...' : 'AI Expand Backstory & Traits'}
                 </button>
+                {avatarError && (
+                  <div className="w-56 p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-[11px] text-rose-200 text-center">
+                    {avatarError}
+                  </div>
+                )}
               </div>
 
               <div className="md:col-span-8 space-y-4">

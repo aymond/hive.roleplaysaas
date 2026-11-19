@@ -999,8 +999,8 @@ async def _run_vertex_imagen(
     model_override: str | None = None,
 ) -> tuple[bytes | None, str]:
     """Configurable Vertex AI Imagen provider (uses GCP ADC)."""
-    project_id = (getattr(config, "vertex_project_id", "") or "").strip()
-    location = (getattr(config, "vertex_location", "europe-west4") or "europe-west4").strip()
+    project_id = (getattr(config, "vertex_project_id", "") or os.getenv("GCP_PROJECT_ID", "")).strip()
+    location = (getattr(config, "vertex_location", "europe-west4") or os.getenv("GCP_REGION", "europe-west4")).strip()
     model_id = (
         (model_override or "").strip()
         or (getattr(config, "vertex_imagen_model", "imagen-3.0-generate-002") or "imagen-3.0-generate-002").strip()

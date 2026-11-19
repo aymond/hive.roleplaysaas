@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -304,8 +304,24 @@ async def get_auth_config() -> dict[str, Any]:
 
 
 @app.get("/api/auth/me")
-async def get_auth_me(user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
-    """Returns the authenticated user's profile (uid, email, role, plan)."""
+async def get_auth_me(
+    response: Response,
+    authorization: str | None = Header(default=None),
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Returns the authenticated user's profile and sets an HttpOnly media cookie."""
+    if SAAS_AUTH_ENABLED and authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        if token:
+            response.set_cookie(
+                key="hm_token",
+                value=token,
+                httponly=True,
+                samesite="lax",
+                secure=bool(os.getenv("K_SERVICE")),
+                max_age=3600,
+                path="/",
+            )
     return {
         "uid": user.uid,
         "email": user.email,
@@ -313,6 +329,12 @@ async def get_auth_me(user: AuthenticatedUser = Depends(get_current_user)) -> di
         "plan": user.plan,
         "saas_auth_enabled": SAAS_AUTH_ENABLED,
     }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(response: Response) -> dict[str, str]:
+    response.delete_cookie(key="hm_token", path="/")
+    return {"status": "signed_out"}
 
 
 @app.get("/api/system/status")
@@ -630,15 +652,37 @@ async def generate_character_avatar(
     )
     full_prompt = ", ".join(portrait_parts)
 
-    img_meta = await generate_image_asset(
-        config=storage.config,
-        output_dir=storage.generated_dir,
-        prompt=full_prompt,
-        negative_prompt=card.negative_prompt_tags,
-        seed=seed,
-        pipeline_role="portrait",
-        uid=user.uid,
-    )
+    try:
+        img_meta = await generate_image_asset(
+            config=storage.config,
+            output_dir=storage.generated_dir,
+            prompt=full_prompt,
+            negative_prompt=card.negative_prompt_tags,
+            seed=seed,
+            pipeline_role="portrait",
+            uid=user.uid,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("⚠️ PORTRAIT | Generation failed for %s: %s", card.name, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Portrait generation failed: {exc}",
+        ) from exc
+
+    configured_provider = getattr(storage.config, "image_provider", "auto")
+    actual_provider = str(img_meta.get("provider", ""))
+    if configured_provider != "procedural_art" and actual_provider.startswith("procedural_art"):
+        logger.warning(
+            "⚠️ PORTRAIT | Configured provider '%s' fell back to procedural_art; aborting gallery save",
+            configured_provider,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Portrait generation failed using '{configured_provider}'. Please check your image provider configuration.",
+        )
+
     card.avatar_url = img_meta["url"]
     card.updated_at = utc_now_iso()
 

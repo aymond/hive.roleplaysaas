@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 SAAS_AUTH_ENABLED = os.getenv("SAAS_AUTH_ENABLED", "false").lower() == "true"
@@ -59,6 +59,7 @@ def _is_configured_admin(uid: str, email: str) -> bool:
 
 async def get_current_user(
     authorization: str | None = Header(default=None),
+    hm_token: str | None = Cookie(default=None),
     x_mock_role: str | None = Header(default=None),
     x_mock_uid: str | None = Header(default=None),
 ) -> AuthenticatedUser:
@@ -93,10 +94,14 @@ async def get_current_user(
         role: Literal["user", "admin"] = "admin" if force_admin else "user"
         return AuthenticatedUser(uid=uid, email=email, role=role, plan="local")
 
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Bearer identity token")
+    token = ""
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    elif hm_token and hm_token.strip():
+        token = hm_token.strip()
 
-    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Bearer identity token")
     if not FIREBASE_AVAILABLE or firebase_auth is None:
         raise HTTPException(status_code=503, detail="GCP Identity Platform SDK not installed")
 
