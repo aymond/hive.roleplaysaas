@@ -8,25 +8,39 @@ import {
   Cpu,
   Sparkles,
   ShieldAlert,
+  LogOut,
+  Shield,
+  User as UserIcon,
 } from 'lucide-react';
 import { api } from './api';
 import type {
+  AuthConfig,
   CharacterCard,
   ChatSession,
   GalleryAsset,
   Lorebook,
   SystemStatus,
+  UserProfile,
 } from './types';
+import {
+  clearAllAuthSessions,
+  getAuthToken,
+  getMockSession,
+} from './auth/firebase';
 import { RoleplayChat } from './components/RoleplayChat';
 import { CharacterForge } from './components/CharacterForge';
 import { WorldCodex } from './components/WorldCodex';
 import { AssetGallery } from './components/AssetGallery';
 import { EngineSettingsModal } from './components/EngineSettingsModal';
 import { AdminModerationModal } from './components/AdminModerationModal';
+import { LoginScreen } from './components/LoginScreen';
 
 type StudioTab = 'chat' | 'characters' | 'worlds' | 'gallery';
 
 export const App: React.FC = () => {
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<StudioTab>('chat');
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [characters, setCharacters] = useState<CharacterCard[]>([]);
@@ -38,31 +52,67 @@ export const App: React.FC = () => {
   const [moderationOpen, setModerationOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const loadAll = useCallback(async () => {
+  const handleSignOut = useCallback(() => {
+    clearAllAuthSessions();
+    setUserProfile(null);
+    setStatus(null);
+    setCharacters([]);
+    setWorlds([]);
+    setChats([]);
+    setActiveChatId('');
+    setGallery([]);
+    setSettingsOpen(false);
+    setModerationOpen(false);
+    setAuthError(null);
+  }, []);
+
+  const bootstrapSession = useCallback(async () => {
+    setLoading(true);
+    setAuthError(null);
     try {
-      const [sys, chars, wlds, chts, gal] = await Promise.all([
+      const cfg = await api.getAuthConfig();
+      setAuthConfig(cfg);
+
+      const hasCredentials = cfg.saas_auth_enabled
+        ? Boolean(getAuthToken())
+        : Boolean(getMockSession());
+
+      if (!hasCredentials) {
+        setUserProfile(null);
+        return;
+      }
+
+      const [me, sys, chars, wlds, chts, gal] = await Promise.all([
+        api.getCurrentUser(),
         api.getSystemStatus(),
         api.listCharacters(),
         api.listWorlds(),
         api.listChats(),
         api.listGallery(),
       ]);
+      setUserProfile(me);
       setStatus(sys);
       setCharacters(chars);
       setWorlds(wlds);
       setChats(chts);
-      if (chts.length > 0 && !activeChatId) {
-        setActiveChatId(chts[0].id);
-      }
+      setActiveChatId(chts[0]?.id || '');
       setGallery(gal);
+    } catch (err: any) {
+      if (err?.status === 401) {
+        clearAllAuthSessions();
+        setUserProfile(null);
+        setAuthError('Your session expired. Please sign in again.');
+      } else {
+        setAuthError(err?.message || 'Failed to authenticate session.');
+      }
     } finally {
       setLoading(false);
     }
-  }, [activeChatId]);
+  }, []);
 
   useEffect(() => {
-    loadAll();
-  }, []);
+    bootstrapSession();
+  }, [bootstrapSession]);
 
   const refreshGallery = useCallback(async () => {
     const gal = await api.listGallery();
@@ -119,6 +169,27 @@ export const App: React.FC = () => {
     },
   ];
 
+  const isAdmin = userProfile?.role === 'admin';
+
+  if (loading && !authConfig) {
+    return (
+      <div className="h-screen w-screen bg-[#090b10] flex items-center justify-center text-sm text-slate-400 gap-2">
+        <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+        Initializing Hivemind Studio...
+      </div>
+    );
+  }
+
+  if (authConfig && !userProfile && !loading) {
+    return (
+      <LoginScreen
+        authConfig={authConfig}
+        initialError={authError}
+        onAuthenticated={bootstrapSession}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#090b10] text-slate-100">
       {/* Compact Single-Row Top Header (< 12% viewport height per content-first-noise-reduction) */}
@@ -140,7 +211,28 @@ export const App: React.FC = () => {
           <nav className="flex items-center gap-1" aria-label="Studio Workspaces">
             {navItems.map((item) => {
               const active = activeTab === item.id;
-              return (
+              const isAdmin = userProfile?.role === 'admin';
+
+  if (loading && !authConfig) {
+    return (
+      <div className="h-screen w-screen bg-[#090b10] flex items-center justify-center text-sm text-slate-400 gap-2">
+        <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+        Initializing Hivemind Studio...
+      </div>
+    );
+  }
+
+  if (authConfig && !userProfile && !loading) {
+    return (
+      <LoginScreen
+        authConfig={authConfig}
+        initialError={authError}
+        onAuthenticated={bootstrapSession}
+      />
+    );
+  }
+
+  return (
                 <button
                   key={item.id}
                   type="button"
@@ -168,10 +260,10 @@ export const App: React.FC = () => {
           </nav>
         </div>
 
-        {/* Right Apple Silicon Telemetry Pill & Settings Trigger */}
+        {/* Right Profile Pill, Admin Controls & Telemetry */}
         <div className="flex items-center gap-2.5">
-          {status && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300">
+          {isAdmin && status && (
+            <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300">
               <Cpu className="w-3.5 h-3.5 text-emerald-400" />
               <span>
                 {status.hardware.cloud_run
@@ -189,24 +281,63 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => setModerationOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-emerald-200 flex items-center gap-1.5 cursor-pointer"
-            title="Admin SFW Trigger-Word Moderation Policy"
-          >
-            <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="hidden sm:inline">SFW Guard</span>
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                onClick={() => setModerationOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-emerald-200 flex items-center gap-1.5 cursor-pointer"
+                title="Admin SFW Trigger-Word Moderation Policy"
+              >
+                <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">SFW Guard</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer"
-          >
-            <Settings className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">Inference Engines</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Settings className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Inference Engines</span>
+              </button>
+            </>
+          )}
+
+          {userProfile && (
+            <div className="flex items-center gap-2 pl-2 border-l border-white/10">
+              <div
+                className={`px-2.5 py-1 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 ${
+                  isAdmin
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
+                    : 'bg-amber-500/15 border-amber-500/30 text-amber-200'
+                }`}
+                title={`Signed in as ${userProfile.email || userProfile.uid} (${userProfile.role})`}
+              >
+                {isAdmin ? (
+                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <UserIcon className="w-3.5 h-3.5 text-amber-400" />
+                )}
+                <span className="hidden md:inline max-w-[140px] truncate">
+                  {userProfile.email || userProfile.uid}
+                </span>
+                <span className="uppercase text-[10px] opacity-80">
+                  {userProfile.role}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="p-1.5 rounded-xl bg-[#151a28] hover:bg-rose-500/20 border border-white/15 hover:border-rose-500/40 text-slate-300 hover:text-rose-200 cursor-pointer"
+                title="Sign Out / Switch Account"
+                aria-label="Sign Out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -266,18 +397,22 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Native <dialog closedby="any"> Modal for Apple Silicon Engine Settings */}
-      <EngineSettingsModal
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        status={status}
-        onStatusUpdated={refreshStatus}
-      />
+      {/* Admin-Only Modals */}
+      {isAdmin && (
+        <>
+          <EngineSettingsModal
+            isOpen={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            status={status}
+            onStatusUpdated={refreshStatus}
+          />
 
-      <AdminModerationModal
-        isOpen={moderationOpen}
-        onClose={() => setModerationOpen(false)}
-      />
+          <AdminModerationModal
+            isOpen={moderationOpen}
+            onClose={() => setModerationOpen(false)}
+          />
+        </>
+      )}
     </div>
   );
 };

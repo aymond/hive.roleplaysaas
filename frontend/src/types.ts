@@ -297,3 +297,18 @@ export interface GalleryAsset {
   duration_ms?: number | null;
   created_at: string;
 }
+
+export interface AuthConfig {
+  saas_auth_enabled: boolean;
+  firebase_api_key: string;
+  firebase_auth_domain: string;
+  firebase_project_id: string;
+}
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  role: 'user' | 'admin';
+  plan: string;
+  saas_auth_enabled: boolean;
+}

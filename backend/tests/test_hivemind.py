@@ -1403,3 +1403,30 @@ def test_character_forge_draft_and_profile_generation() -> None:
     # Cleanup
     del_resp = client.delete(f"/api/characters/{created['id']}")
     assert del_resp.status_code == 200
+
+
+def test_auth_config_and_user_admin_profiles() -> None:
+    import backend.main as main_mod
+
+    client = TestClient(main_mod.app)
+
+    cfg_resp = client.get("/api/auth/config")
+    assert cfg_resp.status_code == 200
+    cfg = cfg_resp.json()
+    assert "saas_auth_enabled" in cfg
+
+    user_resp = client.get(
+        "/api/auth/me",
+        headers={"X-Mock-Uid": "alice", "X-Mock-Role": "user"},
+    )
+    assert user_resp.status_code == 200
+    assert user_resp.json()["uid"] == "alice"
+    assert user_resp.json()["role"] == "user"
+
+    admin_resp = client.get(
+        "/api/auth/me",
+        headers={"X-Mock-Uid": "local-owner", "X-Mock-Role": "admin"},
+    )
+    assert admin_resp.status_code == 200
+    assert admin_resp.json()["uid"] == "local-owner"
+    assert admin_resp.json()["role"] == "admin"

@@ -281,6 +281,29 @@ class BackstoryImageRequest(BaseModel):
     seed: int | None = None
 
 
+@app.get("/api/auth/config")
+async def get_auth_config() -> dict[str, Any]:
+    """Public client auth configuration for the login challenge screen."""
+    return {
+        "saas_auth_enabled": SAAS_AUTH_ENABLED,
+        "firebase_api_key": os.getenv("FIREBASE_WEB_API_KEY", "").strip(),
+        "firebase_auth_domain": os.getenv("FIREBASE_AUTH_DOMAIN", "").strip(),
+        "firebase_project_id": os.getenv("GCP_PROJECT_ID", "").strip(),
+    }
+
+
+@app.get("/api/auth/me")
+async def get_auth_me(user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
+    """Returns the authenticated user's profile (uid, email, role, plan)."""
+    return {
+        "uid": user.uid,
+        "email": user.email,
+        "role": user.role,
+        "plan": user.plan,
+        "saas_auth_enabled": SAAS_AUTH_ENABLED,
+    }
+
+
 @app.get("/api/system/status")
 async def get_system_status(user: AuthenticatedUser = Depends(get_current_user)) -> dict[str, Any]:
     ws = storage.for_user(user.uid)

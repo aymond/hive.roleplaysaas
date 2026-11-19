@@ -1,4 +1,5 @@
 import type {
+  AuthConfig,
   CharacterCard,
   ChatSession,
   GalleryAsset,
@@ -7,29 +8,47 @@ import type {
   SceneState,
   SystemStatus,
   TriggeredLoreInfo,
+  UserProfile,
   WorkflowExecutionResult,
   WorkflowGraph,
 } from './types';
-import { getAuthToken } from './auth/firebase';
+import { getAuthToken, getMockSession } from './auth/firebase';
+
+export function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const mock = getMockSession();
+  if (mock) {
+    headers['X-Mock-Uid'] = mock.uid;
+    headers['X-Mock-Role'] = mock.role;
+  }
+  return headers;
+}
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const token = getAuthToken();
   const res = await fetch(url, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...getAuthHeaders(),
       ...(options?.headers || {}),
     },
-    ...options,
   });
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(errText || `HTTP ${res.status}`);
+    const err = new Error(errText || `HTTP ${res.status}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json() as Promise<T>;
 }
 
 export const api = {
+  getAuthConfig: () => request<AuthConfig>('/api/auth/config'),
+  getCurrentUser: () => request<UserProfile>('/api/auth/me'),
   getSystemStatus: () => request<SystemStatus>('/api/system/status'),
   updateSystemConfig: (config: InferenceConfig) =>
     request<{ status: string; config: InferenceConfig }>('/api/system/config', {
@@ -83,6 +102,7 @@ export const api = {
     form.append('file', file);
     const res = await fetch('/api/characters/import', {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: form,
     });
     if (!res.ok) {
