@@ -209,6 +209,14 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
 
   const handleDelete = async (id: string) => {
     if (characters.length <= 1) return;
+    const target = characters.find((c) => c.id === id);
+    if (
+      !window.confirm(
+        `Delete character "${target?.name || 'this character'}"? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
     await api.deleteCharacter(id);
     const remaining = characters.filter((c) => c.id !== id);
     onCharactersUpdated(remaining);

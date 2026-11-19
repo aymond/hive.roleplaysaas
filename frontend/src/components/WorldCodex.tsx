@@ -199,6 +199,14 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
 
   const handleDeleteEntry = (entryId: string) => {
     if (!draftWorld) return;
+    const target = draftWorld.entries.find((e) => e.id === entryId);
+    if (
+      !window.confirm(
+        `Delete lore entry "${target?.title || 'this entry'}"?`
+      )
+    ) {
+      return;
+    }
     setDraftWorld({
       ...draftWorld,
       entries: draftWorld.entries.filter((e) => e.id !== entryId),

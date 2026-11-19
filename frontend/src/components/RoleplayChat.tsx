@@ -19,6 +19,8 @@ import {
   PinOff,
   RefreshCw,
   Dices,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { api } from '../api';
 import type {
@@ -86,6 +88,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [streamingReply, setStreamingReply] = useState<string>('');
   const [illustratingMsgId, setIllustratingMsgId] = useState<string | null>(null);
+  const [hiddenImageIds, setHiddenImageIds] = useState<Record<string, boolean>>({});
   const [editedScenePrompts, setEditedScenePrompts] = useState<Record<string, string>>({});
   const [checkpointOpen, setCheckpointOpen] = useState(false);
   const [checkpointDraft, setCheckpointDraft] = useState<string>('');
@@ -714,17 +717,50 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                         const matchedAsset = gallery.find((g) => g.url === msg.image_url);
                         const imgW = matchedAsset?.width || 512;
                         const imgH = matchedAsset?.height || 768;
+                        const isHidden = Boolean(hiddenImageIds[msg.id]);
                         return (
                           <div className="mt-3 rounded-xl overflow-hidden border border-white/15 bg-black/60">
-                            <img
-                              src={msg.image_url}
-                              alt={msg.image_prompt || 'Scene keyframe'}
-                              width={imgW}
-                              height={imgH}
-                              loading="lazy"
-                              style={{ aspectRatio: `${imgW} / ${imgH}` }}
-                              className="w-full h-auto max-h-[680px] object-contain mx-auto block"
-                            />
+                            {isHidden ? (
+                              <div className="px-3 py-2 flex items-center justify-between gap-2 bg-[#0b0e16] text-xs text-slate-400">
+                                <span className="flex items-center gap-1.5">
+                                  <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                                  Scene image hidden
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setHiddenImageIds((prev) => ({ ...prev, [msg.id]: false }))
+                                  }
+                                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-[11px] font-medium flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  Show
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="relative group">
+                                <img
+                                  src={msg.image_url}
+                                  alt={msg.image_prompt || 'Scene keyframe'}
+                                  width={imgW}
+                                  height={imgH}
+                                  loading="lazy"
+                                  style={{ aspectRatio: `${imgW} / ${imgH}` }}
+                                  className="w-full h-auto max-h-[680px] object-contain mx-auto block"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setHiddenImageIds((prev) => ({ ...prev, [msg.id]: true }))
+                                  }
+                                  className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-black/70 hover:bg-black/90 text-slate-200 border border-white/15 text-[11px] font-medium flex items-center gap-1 backdrop-blur-sm cursor-pointer transition"
+                                  title="Hide generated image"
+                                >
+                                  <EyeOff className="w-3 h-3" />
+                                  Hide
+                                </button>
+                              </div>
+                            )}
                             {msg.image_prompt && (() => {
                               const draftPrompt =
                                 editedScenePrompts[msg.id] ?? msg.image_prompt;
