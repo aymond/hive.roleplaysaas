@@ -214,7 +214,7 @@ class InferenceConfig(BaseModel):
     openai_api_key: str = "lm-studio"
     openai_model: str = "local-model"
     vertex_gemini_model: str = Field(
-        default_factory=lambda: os.getenv("VERTEX_GEMINI_MODEL", "gemini-2.5-flash")
+        default_factory=lambda: os.getenv("VERTEX_GEMINI_MODEL", "gemini-3.1-flash-lite")
     )
     temperature: float = 0.75
     max_tokens: int = 512

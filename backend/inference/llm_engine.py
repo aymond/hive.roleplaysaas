@@ -217,11 +217,25 @@ def _synthesize_roleplay_reply(
     lore_mention = ""
     if triggered_lore:
         top_lore = triggered_lore[0]
+        snippet_clean = replace_tavern_macros(
+            top_lore.snippet[:110].rstrip("."),
+            char_name=character.name,
+            user_name=user_name,
+        )
         lore_mention = (
-            f" *A faint resonance stirs at the mention of **{top_lore.title}**—{top_lore.snippet[:110].rstrip('.')}...* "
+            f" *A faint resonance stirs at the mention of **{top_lore.title}**—{snippet_clean}...* "
         )
 
-    clean_user = user_message.strip() or "approaches quietly"
+    clean_user = replace_tavern_macros(
+        user_message.strip() or "approaches quietly",
+        char_name=character.name,
+        user_name=user_name,
+    )
+    clean_scenario = replace_tavern_macros(
+        character.scenario or "this realm",
+        char_name=character.name,
+        user_name=user_name,
+    )
     trait = (character.personality.split(",")[0].strip() if character.personality else "observant").lower()
 
     if pick == 0:
@@ -230,7 +244,7 @@ def _synthesize_roleplay_reply(
             f"{lore_mention}\n\n"
             f"\"You speak of `{clean_user[:65]}` as though the currents here aren't already shifting,\" "
             f"*{character.name} murmurs, stepping closer to examine the surroundings.* "
-            f"\"If we mean to press deeper into {character.scenario[:70] if character.scenario else 'this realm'}, "
+            f"\"If we mean to press deeper into {clean_scenario[:70]}, "
             f"we'll need more than curiosity. Tell me—what did you see before you crossed the threshold?\""
         )
     elif pick == 1:
@@ -261,7 +275,9 @@ async def _call_vertex_gemini_chat(
     """Calls Google Cloud Vertex AI Gemini REST endpoint via Application Default Credentials."""
     project_id = (getattr(config, "vertex_project_id", "") or os.getenv("GCP_PROJECT_ID", "")).strip()
     location = (getattr(config, "vertex_location", "europe-west4") or os.getenv("GCP_REGION", "europe-west4")).strip()
-    model_id = (getattr(config, "vertex_gemini_model", "gemini-2.5-flash") or "gemini-2.5-flash").strip()
+    model_id = (getattr(config, "vertex_gemini_model", "gemini-3.1-flash-lite") or "gemini-3.1-flash-lite").strip()
+    if model_id.startswith("gemini-3"):
+        location = "global"
     if not project_id:
         return None
     try:
@@ -428,9 +444,11 @@ async def stream_roleplay_reply(
 ):
     """Async generator yielding (chunk_text, provider_used) tuples for live token streaming."""
     vertex_project = (getattr(config, "vertex_project_id", "") or os.getenv("GCP_PROJECT_ID", "")).strip()
-    if config.llm_provider in ("auto", "vertex_gemini") and vertex_project:
+    if config.llm_provider in ("auto", "vertex_gemini", "vertex_ai") and vertex_project:
         location = (getattr(config, "vertex_location", "europe-west4") or os.getenv("GCP_REGION", "europe-west4")).strip()
-        model_id = (getattr(config, "vertex_gemini_model", "gemini-2.5-flash") or "gemini-2.5-flash").strip()
+        model_id = (getattr(config, "vertex_gemini_model", "gemini-3.1-flash-lite") or "gemini-3.1-flash-lite").strip()
+        if model_id.startswith("gemini-3"):
+            location = "global"
         sys_prompt = build_tavern_system_prompt(
             character,
             lore_context,
