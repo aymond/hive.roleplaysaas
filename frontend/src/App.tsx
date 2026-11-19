@@ -53,6 +53,7 @@ export const App: React.FC = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moderationOpen, setModerationOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const handleSignOut = useCallback(() => {
@@ -67,6 +68,8 @@ export const App: React.FC = () => {
     setGallery([]);
     setSettingsOpen(false);
     setModerationOpen(false);
+    setAdminMenuOpen(false);
+    setUserMenuOpen(false);
     setAuthError(null);
   }, []);
 
@@ -203,10 +206,10 @@ export const App: React.FC = () => {
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 via-orange-500 to-violet-600 flex items-center justify-center shadow-md shadow-amber-500/20">
               <Sparkles className="w-4 h-4 text-slate-950" />
             </div>
-            <div>
+            <div className="flex items-baseline gap-1.5 whitespace-nowrap">
               <span className="font-extrabold tracking-tight text-sm text-white">HIVEMIND</span>
-              <span className="hidden lg:inline-block ml-2 text-[11px] text-slate-400">
-                Hivemind Cloud Roleplay Studio
+              <span className="hidden sm:inline-block text-xs font-medium text-slate-300">
+                Roleplay Studio
               </span>
             </div>
           </div>
@@ -339,37 +342,68 @@ export const App: React.FC = () => {
           )}
 
           {userProfile && (
-            <div className="flex items-center gap-2 pl-2 border-l border-white/10">
-              <div
-                className={`px-2.5 py-1 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 ${
-                  isAdmin
-                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
-                    : 'bg-amber-500/15 border-amber-500/30 text-amber-200'
-                }`}
-                title={`Signed in as ${userProfile.email || userProfile.uid} (${userProfile.role})`}
-              >
-                {isAdmin ? (
-                  <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                ) : (
-                  <UserIcon className="w-3.5 h-3.5 text-amber-400" />
-                )}
-                <span className="hidden md:inline max-w-[140px] truncate">
-                  {userProfile.email || userProfile.uid}
-                </span>
-                <span className="uppercase text-[10px] opacity-80">
-                  {userProfile.role}
-                </span>
-              </div>
-
+            <div className="relative pl-1.5 border-l border-white/10">
               <button
                 type="button"
-                onClick={handleSignOut}
-                className="p-1.5 rounded-xl bg-[#151a28] hover:bg-rose-500/20 border border-white/15 hover:border-rose-500/40 text-slate-300 hover:text-rose-200 cursor-pointer"
-                title="Sign Out / Switch Account"
-                aria-label="Sign Out"
+                onClick={() => {
+                  setUserMenuOpen((prev) => !prev);
+                  setAdminMenuOpen(false);
+                }}
+                className={`p-2 rounded-xl border transition cursor-pointer flex items-center justify-center ${
+                  userMenuOpen
+                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                    : isAdmin
+                    ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-200'
+                    : 'bg-[#151a28] hover:bg-white/10 border-white/15 text-slate-200'
+                }`}
+                title={userProfile.email || userProfile.uid}
+                aria-label="Account menu"
+                aria-expanded={userMenuOpen}
+                aria-haspopup="menu"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <UserIcon className="w-4 h-4" />
               </button>
+
+              {userMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setUserMenuOpen(false)}
+                  />
+                  <div
+                    role="menu"
+                    className="absolute right-0 mt-2 w-60 rounded-2xl bg-[#111520] border border-white/15 shadow-2xl py-2 z-50"
+                  >
+                    <div className="px-3.5 py-2 border-b border-white/10">
+                      <div className="text-xs font-semibold text-white truncate">
+                        {userProfile.email || userProfile.uid}
+                      </div>
+                      <div className="mt-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wider">
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-bold ${
+                            isAdmin
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-amber-500/20 text-amber-300'
+                          }`}
+                        >
+                          {userProfile.role}
+                        </span>
+                        <span className="text-slate-400">{userProfile.plan}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={handleSignOut}
+                      className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-rose-200 flex items-center gap-2.5 hover:bg-rose-500/15 cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4 text-rose-400" />
+                      Log Out
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
