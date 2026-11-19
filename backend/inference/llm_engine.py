@@ -1394,7 +1394,10 @@ def dedupe_and_resolve_prompt_conflicts(
     )
     has_swimwear_in_scene = any(
         k in (scene_text or "").lower()
-        for k in ("bikini", "swimsuit", "swimwear", "lingerie")
+        for k in (
+            "bikini", "swimsuit", "swimwear", "lingerie",
+            "nightgown", "pajamas", "negligee", "robe", "gown",
+        )
     )
     scene_l = (scene_text or "").lower()
 
@@ -1410,7 +1413,23 @@ def dedupe_and_resolve_prompt_conflicts(
                     weighted_atoms.add(p)
 
     seen: set[str] = set()
+    seen_slots: set[str] = set()
     resolved: list[str] = []
+
+    def _semantic_slot(n: str) -> str | None:
+        if n in {"woman", "female", "girl", "1girl", "man", "male", "boy", "1boy"}:
+            return "gender"
+        if re.fullmatch(r"(?:early|mid|late)?[\s-]*(?:\d0s|twenties|thirties|forties|teens|young adult)", n):
+            return "age"
+        if n.endswith(" skin") or "tan skin" in n or "tanned skin" in n or "complexion" in n:
+            return "skin_tone"
+        if " hair" in n or n.endswith(" hair"):
+            return "hair"
+        if " eyes" in n or n.endswith(" eyes"):
+            return "eyes"
+        if n in {"stunning", "beautiful", "gorgeous", "breathtakingly attractive"}:
+            return "beauty_adj"
+        return None
 
     for raw_tag in tags:
         tag = raw_tag.strip().rstrip(".")
@@ -1423,6 +1442,10 @@ def dedupe_and_resolve_prompt_conflicts(
         if not is_weighted and (norm in weighted_atoms or norm in seen):
             continue
         if norm in seen:
+            continue
+
+        slot = _semantic_slot(norm)
+        if slot and slot in seen_slots:
             continue
 
         # Camera / framing conflict guards
@@ -1488,6 +1511,8 @@ def dedupe_and_resolve_prompt_conflicts(
             continue
 
         seen.add(norm)
+        if slot:
+            seen_slots.add(slot)
         resolved.append(tag)
 
     return resolved

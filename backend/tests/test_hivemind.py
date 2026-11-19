@@ -1539,3 +1539,25 @@ def test_portrait_failure_does_not_pollute_gallery(monkeypatch) -> None:
     finally:
         main_mod.storage.config.image_provider = orig_provider
         main_mod.storage.config.vertex_project_id = orig_project
+
+
+def test_semantic_slot_dedup_and_nightgown_attire_override() -> None:
+    raw = (
+        "masterpiece, Woman, Mid-20s, Sun-kissed tan skin, Dark chestnut Long wavy hair, "
+        "Emerald green eyes, Stunning, wearing High-collared leather jacket, "
+        "stunning Kaelen Voss, female, early 20s, light tanned skin, "
+        "dark brown wavy hair with undercut, beautiful, put sheer nightgown"
+    )
+    resolved = dedupe_and_resolve_prompt_conflicts(raw, scene_text="put on a sheer nightgown")
+    joined = ", ".join(resolved).lower()
+    assert "woman" in joined
+    assert "female" not in joined
+    assert "mid-20s" in joined
+    assert "early 20s" not in joined
+    assert "sun-kissed tan skin" in joined
+    assert "light tanned skin" not in joined
+    assert "dark chestnut long wavy hair" in joined
+    assert "dark brown wavy hair" not in joined
+    assert "beautiful" not in joined
+    assert "leather jacket" not in joined
+    assert "sheer nightgown" in joined
