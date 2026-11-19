@@ -358,7 +358,7 @@ const ImageGeneratorNode: React.FC<NodeProps> = ({ id, data }) => {
       <div className="px-3 py-2 bg-cyan-950/60 border-b border-cyan-500/30 flex items-center justify-between">
         <span className="font-bold text-cyan-200 flex items-center gap-1.5">
           <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
-          {String(data.label || 'Apple Silicon Image Synthesizer')}
+          {String(data.label || 'Image Synthesizer')}
         </span>
         <TraceBadge nodeId={id} />
       </div>
@@ -663,7 +663,7 @@ export const NodeStudio: React.FC<NodeStudioProps> = ({
         user_prompt: 'Emphasize dramatic atmosphere and intricate details',
       },
       image_generator: {
-        label: 'Apple Silicon Image Synthesizer',
+        label: 'Image Synthesizer',
         width: 512,
         height: 512,
         steps: 20,

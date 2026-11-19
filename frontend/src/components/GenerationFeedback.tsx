@@ -31,10 +31,10 @@ interface GenerationProgressCardProps {
 export const GenerationProgressCard: React.FC<GenerationProgressCardProps> = ({
   title,
   subtitle,
-  engineLabel = 'Apple Silicon Metal / ComfyUI',
+  engineLabel = 'Cloud / Local Inference',
   stages = [
     'Injecting Character & World Backstory',
-    'Executing Model Inference on Apple Silicon',
+    'Executing Model Inference',
     'Decoding & Rendering Output',
   ],
   compact = false,

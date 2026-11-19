@@ -114,7 +114,7 @@ export const EngineSettingsModal: React.FC<EngineSettingsModalProps> = ({
           </div>
           <div>
             <h2 id="engine-settings-title" className="text-base font-bold text-white">
-              Apple Silicon Inference & Connector Settings
+              Inference &amp; Connector Settings
             </h2>
             <p className="text-xs text-slate-400">
               Configure Vertex AI, Cloud Run GPU / ComfyUI, OpenAI-compatible (vLLM / Ollama), and SFW guardrails

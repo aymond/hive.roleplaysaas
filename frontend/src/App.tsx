@@ -355,9 +355,18 @@ export const App: React.FC = () => {
       {/* Active Studio Workspace */}
       <main className="flex-1 overflow-hidden relative">
         {loading ? (
-          <div className="h-full w-full flex items-center justify-center text-sm text-slate-400 gap-2">
-            <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
-            Initializing Hivemind Studio on Apple Silicon...
+          <div className="h-full w-full flex flex-col items-center justify-center px-6 text-center gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-200">
+              <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+              Loading your workspace...
+            </div>
+            <p className="text-xs text-slate-400 max-w-md">
+              {[
+                'Tip: Bind a World Lorebook to a character so matching keywords automatically enrich your scenes.',
+                'Tip: Pin Scene State fields like attire or location to preserve visual continuity across turns.',
+                'Tip: Use Character Forge to generate a lore-grounded backstory first, then craft a portrait whenever you are ready.',
+              ][Math.floor(Date.now() / 5000) % 3]}
+            </p>
           </div>
         ) : (
           <>
