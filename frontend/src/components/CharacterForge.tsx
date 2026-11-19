@@ -38,6 +38,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   const [savedToast, setSavedToast] = useState(false);
   const [generatingAvatar, setGeneratingAvatar] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [tagInput, setTagInput] = useState('');
   const [importing, setImporting] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -56,8 +57,31 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
     setMobileListOpen(false);
     setCreateError(null);
     setAvatarError(null);
+    setTagInput('');
     setSelectedId(card.id);
     setDraft({ ...card });
+  };
+
+  const commitTagInput = (rawText: string) => {
+    if (!draft) return;
+    const incoming = rawText
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (incoming.length === 0) {
+      setTagInput('');
+      return;
+    }
+    const existingLower = new Set(draft.tags.map((t) => t.toLowerCase()));
+    const nextTags = [...draft.tags];
+    for (const tag of incoming) {
+      if (!existingLower.has(tag.toLowerCase())) {
+        existingLower.add(tag.toLowerCase());
+        nextTags.push(tag);
+      }
+    }
+    setDraft({ ...draft, tags: nextTags });
+    setTagInput('');
   };
 
   const openCreateFlow = () => {
@@ -722,28 +746,62 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1">
-                      Tags (comma-separated)
+                      Tags
                     </label>
-                    <input
-                      type="text"
-                      value={draft.tags.join(', ')}
-                      onChange={(e) =>
-                        setDraft({
-                          ...draft,
-                          tags: e.target.value
-                            .split(',')
-                            .map((t) => t.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                      className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-sm text-white"
-                    />
+                    <div className="w-full min-h-[38px] bg-[#171c2b] border border-white/15 rounded-xl px-2.5 py-1.5 flex flex-wrap items-center gap-1.5">
+                      {draft.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-lg bg-amber-500/15 text-amber-200 border border-amber-500/30"
+                        >
+                          {tag}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDraft({
+                                ...draft,
+                                tags: draft.tags.filter((t) => t !== tag),
+                              })
+                            }
+                            className="text-amber-300/70 hover:text-white cursor-pointer"
+                            aria-label={`Remove tag ${tag}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      <input
+                        type="text"
+                        value={tagInput}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val.includes(',')) {
+                            commitTagInput(val);
+                          } else {
+                            setTagInput(val);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitTagInput(tagInput);
+                          } else if (e.key === 'Backspace' && !tagInput && draft.tags.length > 0) {
+                            setDraft({ ...draft, tags: draft.tags.slice(0, -1) });
+                          }
+                        }}
+                        onBlur={() => {
+                          if (tagInput.trim()) commitTagInput(tagInput);
+                        }}
+                        placeholder={draft.tags.length === 0 ? 'Add tag (Enter or comma)...' : 'Add tag...'}
+                        className="flex-1 min-w-[110px] bg-transparent text-xs text-white placeholder:text-slate-500 focus:outline-none py-0.5"
+                      />
+                    </div>
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-amber-300 mb-1">
-                    Visual Prompt Tags (Used by Image Engine & Comfy Node Studio)
+                    Visual Prompt Tags
                   </label>
                   <textarea
                     rows={2}
