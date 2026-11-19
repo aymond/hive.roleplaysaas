@@ -31,6 +31,7 @@ from .inference.llm_engine import (
     distill_situation_checkpoint,
     fallback_extract_sdxl_keywords,
     format_scene_state_tags,
+    generate_character_profile,
     generate_roleplay_reply,
     harmonize_sdxl_prompt,
     render_prompt_template,
@@ -404,14 +405,41 @@ async def test_admin_moderation_policy(
     return res.model_dump()
 
 
+class GenerateCharacterProfileRequest(BaseModel):
+    brief: str
+    name: str = ""
+    world_id: str | None = None
+
+
+@app.post("/api/characters/generate-profile")
+async def generate_character_profile_endpoint(
+    req: GenerateCharacterProfileRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    if not req.brief.strip():
+        raise HTTPException(status_code=400, detail="Please provide a brief character description")
+    if storage.config.sfw_mode:
+        enforce_moderation_or_422([req.brief, req.name], storage.moderation_policy, context_label="character_profile")
+    ws = storage.for_user(user.uid)
+    world = ws.worlds.get(req.world_id) if req.world_id else None
+    return await generate_character_profile(
+        config=storage.config,
+        brief=req.brief,
+        name=req.name,
+        world_name=world.name if world else "",
+        world_desc=world.description if world else "",
+    )
+
+
 @app.post("/api/characters")
 async def create_character(
     card: CharacterCard,
+    auto_generate_avatar: bool = True,
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> CharacterCard:
     _moderate_character(card)
     ws = storage.for_user(user.uid)
-    if not card.avatar_url:
+    if auto_generate_avatar and not card.avatar_url:
         prompt = card.visual_prompt_tags or f"portrait of {card.name}, {card.title}, fantasy character concept art"
         img_meta = await generate_image_asset(
             config=storage.config,

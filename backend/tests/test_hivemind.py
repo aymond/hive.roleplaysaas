@@ -1344,3 +1344,47 @@ def test_l6_security_and_reliability_hardening(monkeypatch) -> None:
         main_mod.storage.config.runpod_api_key = orig_runpod
         main_mod.storage._tenants.pop("non-admin-user", None)
         main_mod.storage._tenants.pop("admin-user", None)
+
+
+def test_character_forge_draft_and_profile_generation() -> None:
+    import backend.main as main_mod
+
+    client = TestClient(main_mod.app)
+
+    # 1. Generating a profile from a brief description returns structured Character V2 fields
+    gen_resp = client.post(
+        "/api/characters/generate-profile",
+        json={
+            "brief": "A retired sky-pirate navigator who runs a floating tea shop",
+            "name": "Captain Orin",
+        },
+    )
+    assert gen_resp.status_code == 200
+    profile = gen_resp.json()
+    assert profile["name"] == "Captain Orin"
+    assert profile["description"]
+    assert profile["personality"]
+    assert profile["first_mes"]
+    assert profile["visual_prompt_tags"]
+
+    # 2. Creating a character with auto_generate_avatar=false skips portrait generation
+    create_resp = client.post(
+        "/api/characters?auto_generate_avatar=false",
+        json={
+            "name": profile["name"],
+            "title": profile["title"],
+            "description": profile["description"],
+            "personality": profile["personality"],
+            "scenario": profile["scenario"],
+            "first_mes": profile["first_mes"],
+            "tags": profile["tags"],
+            "visual_prompt_tags": profile["visual_prompt_tags"],
+        },
+    )
+    assert create_resp.status_code == 200
+    created = create_resp.json()
+    assert created["avatar_url"] == ""
+
+    # Cleanup
+    del_resp = client.delete(f"/api/characters/{created['id']}")
+    assert del_resp.status_code == 200

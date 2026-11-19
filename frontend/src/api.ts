@@ -39,10 +39,29 @@ export const api = {
 
   // Characters
   listCharacters: () => request<CharacterCard[]>('/api/characters'),
-  createCharacter: (card: Partial<CharacterCard>) =>
-    request<CharacterCard>('/api/characters', {
+  createCharacter: (card: Partial<CharacterCard>, autoGenerateAvatar = true) =>
+    request<CharacterCard>(`/api/characters?auto_generate_avatar=${autoGenerateAvatar}`, {
       method: 'POST',
       body: JSON.stringify(card),
+    }),
+  generateCharacterProfile: (payload: {
+    brief: string;
+    name?: string;
+    world_id?: string | null;
+  }) =>
+    request<{
+      name: string;
+      title: string;
+      description: string;
+      personality: string;
+      scenario: string;
+      first_mes: string;
+      mes_example: string;
+      tags: string[];
+      visual_prompt_tags: string;
+    }>('/api/characters/generate-profile', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
   updateCharacter: (id: string, card: CharacterCard) =>
     request<CharacterCard>(`/api/characters/${id}`, {

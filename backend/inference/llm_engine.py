@@ -624,6 +624,104 @@ async def generate_node_text(
     return expanded, "builtin_synth"
 
 
+async def generate_character_profile(
+    config: InferenceConfig,
+    brief: str,
+    name: str = "",
+    world_name: str = "",
+    world_desc: str = "",
+) -> dict[str, Any]:
+    """Generates a full Character Card V2 profile from a brief user concept."""
+    clean_brief = " ".join(brief.strip().split())
+    clean_name = name.strip()
+    world_ctx = f"World: {world_name}. {world_desc}".strip() if world_name else ""
+
+    sys_prompt = (
+        "You are an expert interactive fiction character designer. "
+        "Given a brief character concept, return ONLY valid JSON (no markdown fences) with these keys:\n"
+        '- "name": string (use provided name if given, else invent a fitting name)\n'
+        '- "title": string (short epithet or role title)\n'
+        '- "description": string (2-3 paragraph backstory & physical presence using {{char}} and {{user}})\n'
+        '- "personality": string (comma-separated personality & speech traits)\n'
+        '- "scenario": string (vivid opening situation where {{user}} meets {{char}})\n'
+        '- "first_mes": string (engaging opening roleplay greeting with *actions* and "dialogue")\n'
+        '- "mes_example": string (short <START> dialogue sample between {{user}} and {{char}})\n'
+        '- "tags": array of 3-5 short genre/trait tags\n'
+        '- "visual_prompt_tags": string (concise comma-separated SDXL/Imagen portrait tags, SFW)'
+    )
+    user_msg = f"Concept: {clean_brief}"
+    if clean_name:
+        user_msg += f"\nPreferred Name: {clean_name}"
+    if world_ctx:
+        user_msg += f"\nSetting Context: {world_ctx}"
+
+    messages = [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": user_msg},
+    ]
+
+    raw: str | None = None
+    if config.llm_provider in ("auto", "ollama"):
+        raw = await _call_ollama_chat(
+            config, messages, purpose="generate_character_profile", num_predict_override=700
+        )
+    if not raw and config.llm_provider in ("vertex_ai", "vertex_gemini", "auto"):
+        raw = await _call_vertex_gemini_chat(
+            config, messages, purpose="generate_character_profile", num_predict_override=900
+        )
+    if not raw and config.llm_provider in ("auto", "openai_compat"):
+        raw = await _call_openai_compat_chat(config, messages)
+
+    if raw:
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+        try:
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, dict) and parsed.get("description"):
+                resolved_name = clean_name or str(parsed.get("name") or "New Character").strip()
+                tags = parsed.get("tags")
+                if not isinstance(tags, list):
+                    tags = ["Original"]
+                return {
+                    "name": resolved_name,
+                    "title": str(parsed.get("title") or "Wanderer").strip(),
+                    "description": str(parsed.get("description") or "").strip(),
+                    "personality": str(parsed.get("personality") or "Observant, articulate").strip(),
+                    "scenario": str(parsed.get("scenario") or "").strip(),
+                    "first_mes": str(parsed.get("first_mes") or "").strip(),
+                    "mes_example": str(parsed.get("mes_example") or "").strip(),
+                    "tags": [str(t).strip() for t in tags if str(t).strip()][:6] or ["Original"],
+                    "visual_prompt_tags": str(parsed.get("visual_prompt_tags") or "").strip(),
+                }
+        except Exception as exc:
+            logger.warning("⚠️ CHAR_GEN | Failed to parse LLM JSON, using fallback: %s", exc)
+
+    resolved_name = clean_name or "New Sovereign"
+    return {
+        "name": resolved_name,
+        "title": "Forged Persona",
+        "description": (
+            f"{{{{char}}}} is shaped by a distinct premise: {clean_brief}.\n\n"
+            f"Carrying the weight of past choices and quiet ambition, {{{{char}}}} observes every newcomer "
+            f"with measured curiosity before revealing their true motives."
+        ),
+        "personality": "Observant, resourceful, articulate, guarded yet intriguing",
+        "scenario": f"{{{{user}}}} crosses paths with {{{{char}}}} in a moment shaped by: {clean_brief}.",
+        "first_mes": (
+            f"*{{{{char}}}} pauses, taking your measure with a calm, steady gaze.*\n\n"
+            f"\"You're not the first to seek me out, {{{{user}}}}—but you might be the first worth listening to.\""
+        ),
+        "mes_example": (
+            "<START>\n"
+            "{{user}}: Tell me what you're really after.\n"
+            "{{char}}: \"Truth has a price. Decide what you're willing to trade, and we'll begin.\""
+        ),
+        "tags": ["Original", "Roleplay"],
+        "visual_prompt_tags": f"portrait of {resolved_name}, {clean_brief}, dramatic rim lighting, detailed concept art, 8k",
+    }
+
+
 _ACTION_SCENE_CUES = (
     "jump", "jumping", "vault", "vaulting", "fence", "climb", "climbing", "tree",
     "wakeboard", "wakeboarding", "surf", "surfing", "run", "running", "sprint", "sprinting",
