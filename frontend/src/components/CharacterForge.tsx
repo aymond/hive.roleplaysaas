@@ -47,10 +47,12 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   const [newWorldId, setNewWorldId] = useState<string>(worlds[0]?.id || '');
   const [generatingProfile, setGeneratingProfile] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [mobileListOpen, setMobileListOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectCharacter = (card: CharacterCard) => {
     setIsCreating(false);
+    setMobileListOpen(false);
     setCreateError(null);
     setSelectedId(card.id);
     setDraft({ ...card });
@@ -58,6 +60,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
 
   const openCreateFlow = () => {
     setIsCreating(true);
+    setMobileListOpen(false);
     setNewName('');
     setNewTitle('');
     setNewRaceOrigins('');
@@ -243,9 +246,19 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   };
 
   return (
-    <div className="grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
+    <div className="relative grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
+      {mobileListOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setMobileListOpen(false)}
+        />
+      )}
       {/* Left Sidebar: Character Cards Deck */}
-      <aside className="col-span-4 lg:col-span-3 border-r border-white/10 bg-[#0d1017] flex flex-col h-full overflow-hidden">
+      <aside
+        className={`${
+          mobileListOpen ? 'fixed inset-y-0 left-0 z-40 w-80 flex shadow-2xl' : 'hidden'
+        } md:static md:w-auto md:flex md:col-span-4 lg:col-span-3 border-r border-white/10 bg-[#0d1017] flex-col h-full overflow-hidden`}
+      >
         <div className="p-3.5 border-b border-white/10 flex items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-white">Character Forge</h2>
@@ -351,7 +364,25 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
       </aside>
 
       {/* Main Editor & Portrait Forge */}
-      <section className="col-span-8 lg:col-span-9 h-full overflow-y-auto p-6">
+      <section className="col-span-12 md:col-span-8 lg:col-span-9 h-full overflow-y-auto p-4 sm:p-6">
+        <div className="md:hidden mb-4 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setMobileListOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-[#161b29] border border-white/15 text-xs font-semibold text-slate-200 flex items-center gap-1.5 cursor-pointer"
+          >
+            <User className="w-3.5 h-3.5 text-amber-400" />
+            Characters ({characters.length})
+          </button>
+          <button
+            type="button"
+            onClick={openCreateFlow}
+            className="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-semibold text-xs flex items-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New
+          </button>
+        </div>
         {isCreating ? (
           <form onSubmit={handleGenerateAndCreate} className="max-w-3xl mx-auto space-y-6">
             <div className="flex items-center justify-between pb-4 border-b border-white/10">

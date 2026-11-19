@@ -84,7 +84,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen w-screen bg-[#090b10] text-slate-100 flex items-center justify-center p-6">
+    <div className="min-h-[100dvh] w-full bg-[#090b10] text-slate-100 flex items-center justify-center p-4 sm:p-6">
       <div className="w-full max-w-md bg-[#0d1017] border border-white/10 rounded-3xl p-7 shadow-2xl space-y-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 via-orange-500 to-violet-600 flex items-center justify-center shadow-lg shadow-amber-500/20">

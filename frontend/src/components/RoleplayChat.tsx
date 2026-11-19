@@ -97,9 +97,12 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   const [lastProvider, setLastProvider] = useState<string>('Ollama / ComfyUI Hybrid');
   const [newRoleplayOpen, setNewRoleplayOpen] = useState(false);
   const [newChatCharId, setNewChatCharId] = useState<string>(characters[0]?.id || '');
+  const [mobileChatsOpen, setMobileChatsOpen] = useState(false);
 
   // Right sidebar collapsible & tab: 'backstory_studio' | 'lore_inspector' | 'scene_state'
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(
+    () => typeof window === 'undefined' || window.innerWidth >= 1024
+  );
   const [rightTab, setRightTab] = useState<
     'backstory_studio' | 'lore_inspector' | 'scene_state'
   >('backstory_studio');
@@ -396,9 +399,19 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
   ];
 
   return (
-    <div className="grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
+    <div className="relative grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
+      {mobileChatsOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
+          onClick={() => setMobileChatsOpen(false)}
+        />
+      )}
       {/* Left Column: Sessions & Collapsible Character Launcher */}
-      <aside className="col-span-3 lg:col-span-2 border-r border-white/10 bg-[#0d1017] flex flex-col h-full overflow-hidden">
+      <aside
+        className={`${
+          mobileChatsOpen ? 'fixed inset-y-0 left-0 z-40 w-72 flex shadow-2xl' : 'hidden'
+        } md:static md:w-auto md:flex md:col-span-3 lg:col-span-2 border-r border-white/10 bg-[#0d1017] flex-col h-full overflow-hidden`}
+      >
         <div className="p-2.5 border-b border-white/10 space-y-2">
           <button
             type="button"
@@ -499,15 +512,24 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
 
       {/* Center Column: Interactive Roleplay Chat Stream */}
       <section
-        className={`col-span-9 ${
+        className={`col-span-12 md:col-span-9 ${
           rightPanelOpen ? 'lg:col-span-6' : 'lg:col-span-10'
         } flex flex-col h-full overflow-hidden bg-[#090b10]`}
       >
         {activeSession && activeCharacter ? (
           <>
             {/* Compact Chat Context Header */}
-            <div className="px-4 py-2.5 border-b border-white/10 bg-[#0d1018]/90 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
+            <div className="px-3 sm:px-4 py-2.5 border-b border-white/10 bg-[#0d1018]/90 flex items-center justify-between gap-2 sm:gap-4">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setMobileChatsOpen(true)}
+                  className="md:hidden p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 shrink-0 cursor-pointer"
+                  title="Open Chats"
+                  aria-label="Open Chats"
+                >
+                  <MessageSquare className="w-4 h-4 text-amber-400" />
+                </button>
                 <img
                   src={activeCharacter.avatar_url}
                   alt={activeCharacter.name}
@@ -556,7 +578,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
                 <button
                   type="button"
                   onClick={() => setRightPanelOpen((prev) => !prev)}
-                  className="hidden lg:flex px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 text-xs font-medium items-center gap-1 cursor-pointer transition"
+                  className="flex px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 text-xs font-medium items-center gap-1 cursor-pointer transition"
                   title={rightPanelOpen ? 'Collapse the Backstory Studio, Scene State & Lore Inspector sidebar' : 'Expand the Backstory Studio, Scene State & Lore Inspector sidebar'}
                 >
                   {rightPanelOpen ? (
@@ -1073,7 +1095,12 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
 
       {/* Right Column: Collapsible Backstory Studio, Persona & Lore, and Scene State */}
       {rightPanelOpen && (
-        <aside className="hidden lg:flex lg:col-span-4 border-l border-white/10 bg-[#0d1017] flex-col h-full overflow-hidden">
+        <>
+          <div
+            className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+            onClick={() => setRightPanelOpen(false)}
+          />
+          <aside className="fixed inset-y-0 right-0 z-40 w-[92vw] max-w-md flex shadow-2xl lg:static lg:w-auto lg:max-w-none lg:shadow-none lg:col-span-4 border-l border-white/10 bg-[#0d1017] flex-col h-full overflow-hidden">
           {/* Sub-Navigation Toggle inside Right Drawer */}
           <div className="p-2.5 border-b border-white/10 bg-[#0a0d14] grid grid-cols-3 gap-1.5">
             <button
@@ -1660,6 +1687,7 @@ export const RoleplayChat: React.FC<RoleplayChatProps> = ({
           </div>
         )}
         </aside>
+        </>
       )}
     </div>
   );

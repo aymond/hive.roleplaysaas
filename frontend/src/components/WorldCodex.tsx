@@ -236,9 +236,9 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
   };
 
   return (
-    <div className="grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
+    <div className="relative grid grid-cols-12 h-full overflow-hidden bg-[#090b10]">
       {/* Left Sidebar: World Lorebooks */}
-      <aside className="col-span-4 lg:col-span-3 border-r border-white/10 bg-[#0d1017] flex flex-col h-full overflow-hidden">
+      <aside className="hidden md:flex md:col-span-4 lg:col-span-3 border-r border-white/10 bg-[#0d1017] flex-col h-full overflow-hidden">
         <div className="p-3.5 border-b border-white/10 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-bold text-white">World Codex</h2>
@@ -296,7 +296,31 @@ export const WorldCodex: React.FC<WorldCodexProps> = ({
       </aside>
 
       {/* Center/Right: World Metadata, Scanner Testbench & Lore Entries */}
-      <section className="col-span-8 lg:col-span-9 h-full overflow-y-auto p-6">
+      <section className="col-span-12 md:col-span-8 lg:col-span-9 h-full overflow-y-auto p-4 sm:p-6">
+        <div className="md:hidden mb-4 flex items-center justify-between gap-2">
+          <select
+            value={selectedWorldId}
+            onChange={(e) => {
+              const found = worlds.find((w) => w.id === e.target.value);
+              if (found) selectWorld(found);
+            }}
+            className="flex-1 bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-xs text-white"
+          >
+            {worlds.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name} ({w.entries.length} entries)
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleCreateWorld}
+            className="px-3 py-2 rounded-xl bg-emerald-500 text-slate-950 font-semibold text-xs flex items-center gap-1 cursor-pointer shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New
+          </button>
+        </div>
         {draftWorld ? (
           <div className="max-w-5xl mx-auto space-y-6">
             {/* World Header */}

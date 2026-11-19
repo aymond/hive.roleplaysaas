@@ -184,7 +184,7 @@ export const App: React.FC = () => {
 
   if (loading && !authConfig) {
     return (
-      <div className="h-screen w-screen bg-[#090b10] flex items-center justify-center text-sm text-slate-400 gap-2">
+      <div className="h-[100dvh] w-full bg-[#090b10] flex items-center justify-center text-sm text-slate-400 gap-2">
         <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
         Initializing Hivemind Studio...
       </div>
@@ -202,24 +202,24 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#090b10] text-slate-100">
-      {/* Compact Single-Row Top Header (< 12% viewport height per content-first-noise-reduction) */}
-      <header className="h-13 px-4 border-b border-white/10 bg-[#0c0f17] flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2.5">
+    <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-[#090b10] text-slate-100">
+      {/* Compact Single-Row Top Header */}
+      <header className="h-13 px-3 sm:px-4 border-b border-white/10 bg-[#0c0f17] flex items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-4 lg:gap-6 min-w-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 via-orange-500 to-violet-600 flex items-center justify-center shadow-md shadow-amber-500/20">
               <Sparkles className="w-4 h-4 text-slate-950" />
             </div>
             <div>
               <span className="font-extrabold tracking-tight text-sm text-white">HIVEMIND</span>
-              <span className="hidden sm:inline-block ml-2 text-[11px] text-slate-400">
+              <span className="hidden lg:inline-block ml-2 text-[11px] text-slate-400">
                 Hivemind Cloud Roleplay Studio
               </span>
             </div>
           </div>
 
-          {/* Primary Workspace Navigation Tabs */}
-          <nav className="flex items-center gap-1" aria-label="Studio Workspaces">
+          {/* Primary Workspace Navigation Tabs (Desktop & Tablet) */}
+          <nav className="hidden md:flex items-center gap-1" aria-label="Studio Workspaces">
             {navItems.map((item) => {
               const active = activeTab === item.id;
               const isAdmin = userProfile?.role === 'admin';
@@ -415,6 +415,29 @@ export const App: React.FC = () => {
           </>
         )}
       </main>
+
+      {/* Mobile Bottom Navigation Bar */}
+      <nav
+        className="md:hidden border-t border-white/10 bg-[#0c0f17] px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-around shrink-0"
+        aria-label="Mobile Workspaces"
+      >
+        {navItems.map((item) => {
+          const active = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setActiveTab(item.id)}
+              className={`min-h-[44px] min-w-[48px] px-2 py-1 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition cursor-pointer ${
+                active ? 'text-amber-400 bg-amber-500/10' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {item.icon}
+              <span className="truncate max-w-[64px]">{item.label.split(' ')[0]}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       {/* Admin-Only Modals */}
       {isAdmin && (
