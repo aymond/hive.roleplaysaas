@@ -1,4 +1,5 @@
 import type {
+  AdminUserRecord,
   AuthConfig,
   CharacterCard,
   ChatSession,
@@ -23,7 +24,6 @@ export function getAuthHeaders(): Record<string, string> {
   const mock = getMockSession();
   if (mock) {
     headers['X-Mock-Uid'] = mock.uid;
-    headers['X-Mock-Role'] = mock.role;
   }
   return headers;
 }
@@ -49,6 +49,19 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   getAuthConfig: () => request<AuthConfig>('/api/auth/config'),
   getCurrentUser: () => request<UserProfile>('/api/auth/me'),
+  listAdminUsers: () => request<AdminUserRecord[]>('/api/admin/users'),
+  updateAdminUser: (
+    uid: string,
+    patch: { role?: 'user' | 'admin'; plan?: string; disabled?: boolean; credit_balance?: number }
+  ) =>
+    request<AdminUserRecord>(`/api/admin/users/${encodeURIComponent(uid)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteAdminUser: (uid: string) =>
+    request<{ status: string; uid: string }>(`/api/admin/users/${encodeURIComponent(uid)}`, {
+      method: 'DELETE',
+    }),
   getSystemStatus: () => request<SystemStatus>('/api/system/status'),
   updateSystemConfig: (config: InferenceConfig) =>
     request<{ status: string; config: InferenceConfig }>('/api/system/config', {

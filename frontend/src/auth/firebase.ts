@@ -10,7 +10,6 @@ const MOCK_SESSION_KEY = 'hivemind_mock_session';
 export interface MockAuthSession {
   uid: string;
   email: string;
-  role: 'user' | 'admin';
 }
 
 export function getAuthToken(): string | null {
@@ -42,7 +41,6 @@ export function getMockSession(): MockAuthSession | null {
       return {
         uid: parsed.uid.trim(),
         email: typeof parsed.email === 'string' ? parsed.email : `${parsed.uid.trim()}@localhost`,
-        role: parsed.role === 'user' ? 'user' : 'admin',
       };
     }
     return null;

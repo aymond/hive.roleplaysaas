@@ -14,9 +14,11 @@ from .models import (
     LoreEntry,
     ModerationPolicy,
     TriggeredLoreInfo,
+    UserRecord,
     WorkflowEdge,
     WorkflowGraph,
     WorkflowNode,
+    utc_now_iso,
 )
 
 
@@ -56,6 +58,7 @@ class StudioStorage:
         self.generated_dir.mkdir(parents=True, exist_ok=True)
 
         self.state_file = self.base_dir / "studio_state.json"
+        self.users_file = self.base_dir / "users.json"
 
         self.config: InferenceConfig = InferenceConfig()
         self.moderation_policy: ModerationPolicy = ModerationPolicy()
@@ -66,7 +69,9 @@ class StudioStorage:
         self.gallery: list[GalleryAsset] = []
         self._tenants: dict[str, TenantWorkspace] = {}
         self._billing: dict[str, dict[str, Any]] = {}
+        self._users: dict[str, UserRecord] = {}
 
+        self._load_users()
         self.load_or_seed()
 
     def for_user(self, uid: str = "local-owner") -> TenantWorkspace:
@@ -114,6 +119,97 @@ class StudioStorage:
         if event_id:
             seen_events.add(event_id)
         return new_bal
+
+    def _load_users(self) -> None:
+        if not self.users_file.exists():
+            return
+        try:
+            raw = json.loads(self.users_file.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                self._users = {
+                    uid: UserRecord.model_validate(item) for uid, item in raw.items()
+                }
+        except Exception:
+            self._users = {}
+
+    def _save_users(self) -> None:
+        payload = {uid: rec.model_dump() for uid, rec in self._users.items()}
+        self.users_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def get_user(self, uid: str) -> UserRecord | None:
+        return self._users.get(uid)
+
+    def list_users(self) -> list[UserRecord]:
+        return sorted(self._users.values(), key=lambda u: u.created_at, reverse=True)
+
+    def upsert_user_on_login(
+        self,
+        uid: str,
+        email: str = "",
+        default_role: str = "user",
+        default_plan: str = "free",
+        force_admin: bool = False,
+    ) -> UserRecord:
+        now = utc_now_iso()
+        existing = self._users.get(uid)
+        if existing:
+            changed = False
+            if email and existing.email != email:
+                existing.email = email
+                changed = True
+            if force_admin and existing.role != "admin":
+                existing.role = "admin"
+                changed = True
+            existing.last_login_at = now
+            if changed or True:
+                self._save_users()
+            return existing
+
+        resolved_role = "admin" if (force_admin or default_role == "admin") else "user"
+        rec = UserRecord(
+            uid=uid,
+            email=email or f"{uid}@localhost",
+            role=resolved_role,
+            plan=default_plan,
+            disabled=False,
+            credit_balance=50,
+            created_at=now,
+            last_login_at=now,
+        )
+        self._users[uid] = rec
+        self._save_users()
+        return rec
+
+    def update_user(
+        self,
+        uid: str,
+        *,
+        role: str | None = None,
+        plan: str | None = None,
+        disabled: bool | None = None,
+        credit_balance: int | None = None,
+    ) -> UserRecord:
+        rec = self._users.get(uid)
+        if not rec:
+            raise KeyError(f"User not found: {uid}")
+        if role in ("user", "admin"):
+            rec.role = role  # type: ignore[assignment]
+        if plan is not None:
+            rec.plan = plan
+        if disabled is not None:
+            rec.disabled = bool(disabled)
+        if credit_balance is not None:
+            rec.credit_balance = max(0, int(credit_balance))
+        self._save_users()
+        return rec
+
+    def delete_user(self, uid: str) -> bool:
+        if uid not in self._users:
+            return False
+        del self._users[uid]
+        self._tenants.pop(uid, None)
+        self._save_users()
+        return True
 
     def _ensure_seed_artwork(self, filename: str, prompt: str, seed: int) -> str:
         target = self.generated_dir / filename

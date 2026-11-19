@@ -330,3 +330,14 @@ class ModerationPolicy(BaseModel):
     regex_patterns: list[str] = Field(default_factory=list)
     updated_by: str = "admin"
     updated_at: str = Field(default_factory=utc_now_iso)
+
+
+class UserRecord(BaseModel):
+    uid: str
+    email: str = ""
+    role: Literal["user", "admin"] = "user"
+    plan: str = "free"
+    disabled: bool = False
+    credit_balance: int = 50
+    created_at: str = Field(default_factory=utc_now_iso)
+    last_login_at: str = Field(default_factory=utc_now_iso)

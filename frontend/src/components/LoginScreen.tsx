@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, Shield, User, Lock, Mail, ArrowRight } from 'lucide-react';
+import { Sparkles, User, Lock, Mail, ArrowRight } from 'lucide-react';
 import type { AuthConfig } from '../types';
 import { setMockSession, signInWithIdentityPlatform } from '../auth/firebase';
 
@@ -18,9 +18,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
 
-  // Local multi-tenant sandbox profile state (when saas_auth_enabled === false)
-  const [localUid, setLocalUid] = useState('alice');
-  const [localRole, setLocalRole] = useState<'user' | 'admin'>('user');
+  // Local mode username/email sign-in (role is always assigned server-side)
+  const [localIdentity, setLocalIdentity] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(initialError || null);
@@ -50,20 +49,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
   const handleLocalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanUid = localUid.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '-') || 'user';
+    const raw = localIdentity.trim().toLowerCase();
+    if (!raw) {
+      setError('Please enter your username or email');
+      return;
+    }
+    const cleanUid = raw.replace(/[^a-z0-9.@_-]/g, '-');
     setMockSession({
       uid: cleanUid,
-      email: `${cleanUid}@localhost`,
-      role: localRole,
-    });
-    onAuthenticated();
-  };
-
-  const quickLocalLogin = (uid: string, role: 'user' | 'admin') => {
-    setMockSession({
-      uid,
-      email: `${uid}@localhost`,
-      role,
+      email: cleanUid.includes('@') ? cleanUid : `${cleanUid}@localhost`,
     });
     onAuthenticated();
   };
@@ -80,7 +74,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <p className="text-xs text-slate-400">
               {authConfig.saas_auth_enabled
                 ? 'Sign in to your private workspace'
-                : 'Multi-Tenant Studio Login'}
+                : 'Sign in with your account'}
             </p>
           </div>
         </div>
@@ -153,90 +147,38 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             </div>
           </form>
         ) : (
-          <div className="space-y-5">
-            <form onSubmit={handleLocalSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Account / Tenant ID
-                </label>
+          <form onSubmit={handleLocalSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Username or Email
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                 <input
                   type="text"
                   required
-                  value={localUid}
-                  onChange={(e) => setLocalUid(e.target.value)}
-                  placeholder="e.g. alice, bob, or local-owner"
-                  className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-sm text-white"
+                  value={localIdentity}
+                  onChange={(e) => {
+                    setLocalIdentity(e.target.value);
+                    setError(null);
+                  }}
+                  placeholder="Enter your username or email"
+                  className="w-full bg-[#171c2b] border border-white/15 rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-slate-500"
                 />
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Profile Type
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setLocalRole('user')}
-                    className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                      localRole === 'user'
-                        ? 'bg-amber-500/20 border-amber-500/60 text-amber-200'
-                        : 'bg-[#171c2b] border-white/10 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <User className="w-3.5 h-3.5" />
-                    Standard User
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLocalRole('admin')}
-                    className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                      localRole === 'admin'
-                        ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-200'
-                        : 'bg-[#171c2b] border-white/10 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Shield className="w-3.5 h-3.5" />
-                    Administrator
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 cursor-pointer"
-              >
-                Enter Studio
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
-
-            <div className="pt-4 border-t border-white/10 space-y-2">
-              <p className="text-[11px] text-slate-400 font-medium">Quick Switch Profiles:</p>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => quickLocalLogin('alice', 'user')}
-                  className="px-2.5 py-2 rounded-xl bg-[#171c2b] hover:bg-white/10 border border-white/10 text-[11px] text-slate-200 cursor-pointer"
-                >
-                  User: Alice
-                </button>
-                <button
-                  type="button"
-                  onClick={() => quickLocalLogin('bob', 'user')}
-                  className="px-2.5 py-2 rounded-xl bg-[#171c2b] hover:bg-white/10 border border-white/10 text-[11px] text-slate-200 cursor-pointer"
-                >
-                  User: Bob
-                </button>
-                <button
-                  type="button"
-                  onClick={() => quickLocalLogin('local-owner', 'admin')}
-                  className="px-2.5 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-[11px] text-emerald-200 cursor-pointer"
-                >
-                  Admin
-                </button>
-              </div>
+              <p className="mt-2 text-[11px] text-slate-500">
+                New accounts are registered as standard users. Administrator access is managed by the platform owner.
+              </p>
             </div>
-          </div>
+
+            <button
+              type="submit"
+              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 cursor-pointer"
+            >
+              Sign In
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </form>
         )}
       </div>
     </div>

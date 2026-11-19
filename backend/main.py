@@ -52,7 +52,13 @@ from .models import (
     WorkflowGraph,
     utc_now_iso,
 )
-from .auth import SAAS_AUTH_ENABLED, AuthenticatedUser, get_current_user, require_admin
+from .auth import (
+    SAAS_AUTH_ENABLED,
+    AuthenticatedUser,
+    get_current_user,
+    require_admin,
+    set_user_directory,
+)
 from .billing import router as billing_router
 from .media_gcs import download_user_media, is_gcs_enabled
 from .moderation import enforce_moderation_or_422, scan_for_trigger_words
@@ -92,6 +98,7 @@ if _use_firestore:
     storage: StudioStorage = FirestoreStorage()
 else:
     storage = StudioStorage()
+set_user_directory(storage)
 set_hivemind_log_level(getattr(storage.config, "log_level", "INFO"))
 
 if not SAAS_AUTH_ENABLED:
@@ -417,6 +424,72 @@ async def update_admin_moderation_policy(
     storage.moderation_policy = policy
     storage.save()
     return storage.moderation_policy
+
+
+class AdminUserUpdateRequest(BaseModel):
+    role: str | None = None
+    plan: str | None = None
+    disabled: bool | None = None
+    credit_balance: int | None = None
+
+
+@app.get("/api/admin/users")
+async def list_admin_users(
+    admin: AuthenticatedUser = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    return [u.model_dump() for u in storage.list_users()]
+
+
+@app.patch("/api/admin/users/{target_uid}")
+async def update_admin_user(
+    target_uid: str,
+    patch: AdminUserUpdateRequest,
+    admin: AuthenticatedUser = Depends(require_admin),
+) -> dict[str, Any]:
+    if target_uid == admin.uid:
+        if patch.role == "user":
+            raise HTTPException(status_code=400, detail="You cannot demote your own admin account")
+        if patch.disabled is True:
+            raise HTTPException(status_code=400, detail="You cannot disable your own account")
+    if patch.role is not None and patch.role not in ("user", "admin"):
+        raise HTTPException(status_code=400, detail="Role must be 'user' or 'admin'")
+    try:
+        updated = storage.update_user(
+            target_uid,
+            role=patch.role,
+            plan=patch.plan,
+            disabled=patch.disabled,
+            credit_balance=patch.credit_balance,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"User '{target_uid}' not found") from exc
+
+    if SAAS_AUTH_ENABLED and (patch.role is not None or patch.plan is not None):
+        try:
+            from .auth import FIREBASE_AVAILABLE, _ensure_firebase_app, firebase_auth
+
+            if FIREBASE_AVAILABLE and firebase_auth is not None:
+                _ensure_firebase_app()
+                firebase_auth.set_custom_user_claims(
+                    target_uid,
+                    {"role": updated.role, "plan": updated.plan},
+                )
+        except Exception as exc:
+            logger.warning("⚠️ ADMIN    | Failed to sync Firebase custom claims for %s: %s", target_uid, exc)
+
+    return updated.model_dump()
+
+
+@app.delete("/api/admin/users/{target_uid}")
+async def delete_admin_user(
+    target_uid: str,
+    admin: AuthenticatedUser = Depends(require_admin),
+) -> dict[str, str]:
+    if target_uid == admin.uid:
+        raise HTTPException(status_code=400, detail="You cannot delete your own active account")
+    if not storage.delete_user(target_uid):
+        raise HTTPException(status_code=404, detail=f"User '{target_uid}' not found")
+    return {"status": "deleted", "uid": target_uid}
 
 
 @app.post("/api/admin/moderation/test")

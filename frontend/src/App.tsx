@@ -34,8 +34,9 @@ import { AssetGallery } from './components/AssetGallery';
 import { EngineSettingsModal } from './components/EngineSettingsModal';
 import { AdminModerationModal } from './components/AdminModerationModal';
 import { LoginScreen } from './components/LoginScreen';
+import { AdminPage } from './components/AdminPage';
 
-type StudioTab = 'chat' | 'characters' | 'worlds' | 'gallery';
+type StudioTab = 'chat' | 'characters' | 'worlds' | 'gallery' | 'admin';
 
 export const App: React.FC = () => {
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
@@ -55,6 +56,7 @@ export const App: React.FC = () => {
   const handleSignOut = useCallback(() => {
     clearAllAuthSessions();
     setUserProfile(null);
+    setActiveTab('chat');
     setStatus(null);
     setCharacters([]);
     setWorlds([]);
@@ -167,6 +169,15 @@ export const App: React.FC = () => {
       badge: gallery.length,
       icon: <ImageIcon className="w-4 h-4" />,
     },
+    ...(userProfile?.role === 'admin'
+      ? [
+          {
+            id: 'admin' as StudioTab,
+            label: 'Admin',
+            icon: <Shield className="w-4 h-4" />,
+          },
+        ]
+      : []),
   ];
 
   const isAdmin = userProfile?.role === 'admin';
@@ -391,6 +402,14 @@ export const App: React.FC = () => {
                 characters={characters}
                 worlds={worlds}
                 onGalleryUpdated={refreshGallery}
+              />
+            )}
+
+            {activeTab === 'admin' && isAdmin && userProfile && (
+              <AdminPage
+                currentUser={userProfile}
+                onOpenEngineSettings={() => setSettingsOpen(true)}
+                onOpenModeration={() => setModerationOpen(true)}
               />
             )}
           </>

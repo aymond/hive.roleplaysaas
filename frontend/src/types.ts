@@ -312,3 +312,14 @@ export interface UserProfile {
   plan: string;
   saas_auth_enabled: boolean;
 }
+
+export interface AdminUserRecord {
+  uid: string;
+  email: string;
+  role: 'user' | 'admin';
+  plan: string;
+  disabled: boolean;
+  credit_balance: number;
+  created_at: string;
+  last_login_at: string;
+}

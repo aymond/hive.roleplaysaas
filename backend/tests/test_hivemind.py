@@ -1430,3 +1430,69 @@ def test_auth_config_and_user_admin_profiles() -> None:
     assert admin_resp.status_code == 200
     assert admin_resp.json()["uid"] == "local-owner"
     assert admin_resp.json()["role"] == "admin"
+
+
+def test_admin_user_management_and_server_assigned_roles(monkeypatch) -> None:
+    import backend.main as main_mod
+
+    client = TestClient(main_mod.app)
+    try:
+        # Simulate browser request (outside pytest role override): user cannot self-elevate to admin
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        spoof_resp = client.get(
+            "/api/auth/me",
+            headers={"X-Mock-Uid": "charlie-test", "X-Mock-Role": "admin"},
+        )
+        assert spoof_resp.status_code == 200
+        assert spoof_resp.json()["uid"] == "charlie-test"
+        assert spoof_resp.json()["role"] == "user"
+
+        # Standard user cannot access admin user management
+        assert (
+            client.get("/api/admin/users", headers={"X-Mock-Uid": "charlie-test"}).status_code
+            == 403
+        )
+
+        # Admin (local-owner) can list, promote, disable, and delete users
+        admin_hdr = {"X-Mock-Uid": "local-owner"}
+        users_resp = client.get("/api/admin/users", headers=admin_hdr)
+        assert users_resp.status_code == 200
+        assert any(u["uid"] == "charlie-test" and u["role"] == "user" for u in users_resp.json())
+
+        # Promote charlie-test to admin
+        prom_resp = client.patch(
+            "/api/admin/users/charlie-test",
+            json={"role": "admin", "plan": "pro"},
+            headers=admin_hdr,
+        )
+        assert prom_resp.status_code == 200
+        assert prom_resp.json()["role"] == "admin"
+        assert prom_resp.json()["plan"] == "pro"
+
+        # Disable charlie-test -> subsequent login/API calls blocked with 403
+        dis_resp = client.patch(
+            "/api/admin/users/charlie-test",
+            json={"disabled": True},
+            headers=admin_hdr,
+        )
+        assert dis_resp.status_code == 200
+        assert (
+            client.get("/api/auth/me", headers={"X-Mock-Uid": "charlie-test"}).status_code == 403
+        )
+
+        # Admin cannot demote or delete themselves
+        assert (
+            client.patch(
+                "/api/admin/users/local-owner",
+                json={"role": "user"},
+                headers=admin_hdr,
+            ).status_code
+            == 400
+        )
+        assert client.delete("/api/admin/users/local-owner", headers=admin_hdr).status_code == 400
+
+        # Admin can delete charlie-test
+        assert client.delete("/api/admin/users/charlie-test", headers=admin_hdr).status_code == 200
+    finally:
+        main_mod.storage.delete_user("charlie-test")
+        main_mod.storage.delete_user("local-owner")

@@ -14,6 +14,7 @@ from .models import (
     InferenceConfig,
     Lorebook,
     ModerationPolicy,
+    UserRecord,
     WorkflowGraph,
     utc_now_iso,
 )
@@ -188,3 +189,106 @@ class FirestoreStorage(StudioStorage):
             return new_bal
 
         return _txn(self._db.transaction())
+
+    @staticmethod
+    def _doc_to_user_record(uid: str, data: dict[str, Any]) -> UserRecord:
+        return UserRecord(
+            uid=str(data.get("uid") or uid),
+            email=str(data.get("email") or ""),
+            role="admin" if data.get("role") == "admin" else "user",
+            plan=str(data.get("plan") or "free"),
+            disabled=bool(data.get("disabled", False)),
+            credit_balance=int(data.get("credit_balance", 50)),
+            created_at=str(data.get("created_at") or utc_now_iso()),
+            last_login_at=str(data.get("last_login_at") or utc_now_iso()),
+        )
+
+    def get_user(self, uid: str) -> UserRecord | None:
+        snap = self._db.collection("users").document(uid).get()
+        if not snap.exists:
+            return None
+        return self._doc_to_user_record(uid, snap.to_dict() or {})
+
+    def list_users(self) -> list[UserRecord]:
+        users = [
+            self._doc_to_user_record(doc.id, doc.to_dict() or {})
+            for doc in self._db.collection("users").stream()
+        ]
+        return sorted(users, key=lambda u: u.created_at, reverse=True)
+
+    def upsert_user_on_login(
+        self,
+        uid: str,
+        email: str = "",
+        default_role: str = "user",
+        default_plan: str = "free",
+        force_admin: bool = False,
+    ) -> UserRecord:
+        now = utc_now_iso()
+        user_ref = self._db.collection("users").document(uid)
+        snap = user_ref.get()
+        if snap.exists:
+            data = snap.to_dict() or {}
+            updates: dict[str, Any] = {"last_login_at": now}
+            if email and data.get("email") != email:
+                updates["email"] = email
+            if force_admin and data.get("role") != "admin":
+                updates["role"] = "admin"
+            user_ref.set(updates, merge=True)
+            merged = {**data, **updates}
+            return self._doc_to_user_record(uid, merged)
+
+        self.for_user(uid)
+        resolved_role = "admin" if (force_admin or default_role == "admin") else "user"
+        updates = {
+            "uid": uid,
+            "email": email or f"{uid}@localhost",
+            "role": resolved_role,
+            "plan": default_plan,
+            "disabled": False,
+            "last_login_at": now,
+        }
+        user_ref.set(updates, merge=True)
+        return self.get_user(uid) or UserRecord(
+            uid=uid,
+            email=updates["email"],
+            role=resolved_role,  # type: ignore[arg-type]
+            plan=default_plan,
+            created_at=now,
+            last_login_at=now,
+        )
+
+    def update_user(
+        self,
+        uid: str,
+        *,
+        role: str | None = None,
+        plan: str | None = None,
+        disabled: bool | None = None,
+        credit_balance: int | None = None,
+    ) -> UserRecord:
+        user_ref = self._db.collection("users").document(uid)
+        if not user_ref.get().exists:
+            raise KeyError(f"User not found: {uid}")
+        updates: dict[str, Any] = {}
+        if role in ("user", "admin"):
+            updates["role"] = role
+        if plan is not None:
+            updates["plan"] = plan
+        if disabled is not None:
+            updates["disabled"] = bool(disabled)
+        if credit_balance is not None:
+            updates["credit_balance"] = max(0, int(credit_balance))
+        if updates:
+            user_ref.set(updates, merge=True)
+        updated = self.get_user(uid)
+        assert updated is not None
+        return updated
+
+    def delete_user(self, uid: str) -> bool:
+        user_ref = self._db.collection("users").document(uid)
+        if not user_ref.get().exists:
+            return False
+        user_ref.delete()
+        self._tenant_cache.pop(uid, None)
+        return True
