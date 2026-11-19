@@ -11,6 +11,7 @@ import {
   LogOut,
   Shield,
   User as UserIcon,
+  Menu,
 } from 'lucide-react';
 import { api } from './api';
 import type {
@@ -51,6 +52,7 @@ export const App: React.FC = () => {
   const [gallery, setGallery] = useState<GalleryAsset[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moderationOpen, setModerationOpen] = useState(false);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const handleSignOut = useCallback(() => {
@@ -169,15 +171,6 @@ export const App: React.FC = () => {
       badge: gallery.length,
       icon: <ImageIcon className="w-4 h-4" />,
     },
-    ...(userProfile?.role === 'admin'
-      ? [
-          {
-            id: 'admin' as StudioTab,
-            label: 'Admin',
-            icon: <Shield className="w-4 h-4" />,
-          },
-        ]
-      : []),
   ];
 
   const isAdmin = userProfile?.role === 'admin';
@@ -222,33 +215,12 @@ export const App: React.FC = () => {
           <nav className="hidden md:flex items-center gap-1" aria-label="Studio Workspaces">
             {navItems.map((item) => {
               const active = activeTab === item.id;
-              const isAdmin = userProfile?.role === 'admin';
-
-  if (loading && !authConfig) {
-    return (
-      <div className="h-screen w-screen bg-[#090b10] flex items-center justify-center text-sm text-slate-400 gap-2">
-        <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
-        Initializing Hivemind Studio...
-      </div>
-    );
-  }
-
-  if (authConfig && !userProfile && !loading) {
-    return (
-      <LoginScreen
-        authConfig={authConfig}
-        initialError={authError}
-        onAuthenticated={bootstrapSession}
-      />
-    );
-  }
-
-  return (
+              return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => setActiveTab(item.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-2 transition cursor-pointer ${
                     active
                       ? 'bg-amber-500 text-slate-950 shadow-sm'
                       : 'text-slate-300 hover:bg-white/5 hover:text-white'
@@ -271,10 +243,10 @@ export const App: React.FC = () => {
           </nav>
         </div>
 
-        {/* Right Profile Pill, Admin Controls & Telemetry */}
-        <div className="flex items-center gap-2.5">
+        {/* Right Profile Pill, Admin Hamburger Menu & Telemetry */}
+        <div className="flex items-center gap-2 shrink-0">
           {isAdmin && status && (
-            <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300">
+            <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300 whitespace-nowrap">
               <Cpu className="w-3.5 h-3.5 text-emerald-400" />
               <span>
                 {status.hardware.cloud_run
@@ -293,26 +265,77 @@ export const App: React.FC = () => {
           )}
 
           {isAdmin && (
-            <>
+            <div className="relative">
               <button
                 type="button"
-                onClick={() => setModerationOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-emerald-200 flex items-center gap-1.5 cursor-pointer"
-                title="Admin SFW Trigger-Word Moderation Policy"
+                onClick={() => setAdminMenuOpen((prev) => !prev)}
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition ${
+                  adminMenuOpen || activeTab === 'admin'
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
+                    : 'bg-[#151a28] hover:bg-white/10 border-white/15 text-slate-200'
+                }`}
+                title="Admin Menu (User Management, SFW Guard, Inference Engines)"
+                aria-expanded={adminMenuOpen}
+                aria-haspopup="menu"
               >
-                <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">SFW Guard</span>
+                <Menu className="w-4 h-4 text-emerald-400" />
+                <span className="hidden sm:inline">Admin</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-[#151a28] hover:bg-white/10 border border-white/15 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer"
-              >
-                <Settings className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden sm:inline">Inference Engines</span>
-              </button>
-            </>
+              {adminMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setAdminMenuOpen(false)}
+                  />
+                  <div
+                    role="menu"
+                    className="absolute right-0 mt-2 w-56 rounded-2xl bg-[#111520] border border-white/15 shadow-2xl py-1.5 z-50"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setActiveTab('admin');
+                        setAdminMenuOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-left text-xs font-semibold flex items-center gap-2.5 hover:bg-white/10 cursor-pointer ${
+                        activeTab === 'admin' ? 'text-emerald-300 bg-emerald-500/10' : 'text-slate-200'
+                      }`}
+                    >
+                      <Shield className="w-4 h-4 text-emerald-400" />
+                      Admin &amp; Users
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setModerationOpen(true);
+                        setAdminMenuOpen(false);
+                      }}
+                      className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-200 flex items-center gap-2.5 hover:bg-white/10 cursor-pointer"
+                    >
+                      <ShieldAlert className="w-4 h-4 text-emerald-400" />
+                      SFW Guard
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setSettingsOpen(true);
+                        setAdminMenuOpen(false);
+                      }}
+                      className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-slate-200 flex items-center gap-2.5 hover:bg-white/10 cursor-pointer"
+                    >
+                      <Settings className="w-4 h-4 text-amber-400" />
+                      Inference Engines
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {userProfile && (
