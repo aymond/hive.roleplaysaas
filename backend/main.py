@@ -406,8 +406,11 @@ async def test_admin_moderation_policy(
 
 
 class GenerateCharacterProfileRequest(BaseModel):
-    brief: str
+    brief: str = ""
     name: str = ""
+    title: str = ""
+    race_origins: str = ""
+    appearance: str = ""
     world_id: str | None = None
 
 
@@ -416,18 +419,31 @@ async def generate_character_profile_endpoint(
     req: GenerateCharacterProfileRequest,
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> dict[str, Any]:
-    if not req.brief.strip():
-        raise HTTPException(status_code=400, detail="Please provide a brief character description")
+    if not any([req.brief.strip(), req.name.strip(), req.title.strip(), req.race_origins.strip(), req.appearance.strip()]):
+        raise HTTPException(status_code=400, detail="Please enter at least a brief description, title, origins, or appearance")
     if storage.config.sfw_mode:
-        enforce_moderation_or_422([req.brief, req.name], storage.moderation_policy, context_label="character_profile")
+        enforce_moderation_or_422(
+            [req.brief, req.name, req.title, req.race_origins, req.appearance],
+            storage.moderation_policy,
+            context_label="character_profile",
+        )
     ws = storage.for_user(user.uid)
     world = ws.worlds.get(req.world_id) if req.world_id else None
+    lore_snippets = (
+        [f"[{e.category}] {e.title}: {e.content[:180]}" for e in world.entries[:6]]
+        if world
+        else []
+    )
     return await generate_character_profile(
         config=storage.config,
         brief=req.brief,
         name=req.name,
+        title=req.title,
+        race_origins=req.race_origins,
+        appearance=req.appearance,
         world_name=world.name if world else "",
         world_desc=world.description if world else "",
+        world_lore_snippets=lore_snippets,
     )
 
 

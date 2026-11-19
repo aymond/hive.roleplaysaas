@@ -40,6 +40,9 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   const [importing, setImporting] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newTitle, setNewTitle] = useState('');
+  const [newRaceOrigins, setNewRaceOrigins] = useState('');
+  const [newAppearance, setNewAppearance] = useState('');
   const [newBrief, setNewBrief] = useState('');
   const [newWorldId, setNewWorldId] = useState<string>(worlds[0]?.id || '');
   const [generatingProfile, setGeneratingProfile] = useState(false);
@@ -56,30 +59,55 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
   const openCreateFlow = () => {
     setIsCreating(true);
     setNewName('');
+    setNewTitle('');
+    setNewRaceOrigins('');
+    setNewAppearance('');
     setNewBrief('');
     setNewWorldId(worlds[0]?.id || '');
     setCreateError(null);
   };
 
+  const hasAnyCreateInput = Boolean(
+    newName.trim() ||
+      newTitle.trim() ||
+      newRaceOrigins.trim() ||
+      newAppearance.trim() ||
+      newBrief.trim()
+  );
+
   const handleCreateBlank = async () => {
     setCreateError(null);
-    const trimmedBrief = newBrief.trim();
+    const selectedWorld = worlds.find((w) => w.id === newWorldId);
     const resolvedName = newName.trim() || 'New Character';
+    const resolvedTitle =
+      newTitle.trim() || (selectedWorld ? `Traveler of ${selectedWorld.name}` : 'Original Persona');
+    const descParts = [
+      newRaceOrigins.trim() ? `Origins: ${newRaceOrigins.trim()}` : '',
+      newAppearance.trim() ? `Appearance: ${newAppearance.trim()}` : '',
+      newBrief.trim(),
+      selectedWorld?.description ? `World (${selectedWorld.name}): ${selectedWorld.description}` : '',
+    ].filter(Boolean);
+    const visualParts = [
+      `portrait of ${resolvedName}`,
+      newTitle.trim(),
+      newRaceOrigins.trim(),
+      newAppearance.trim(),
+      newBrief.trim(),
+    ].filter(Boolean);
+
     const newCard = await api.createCharacter(
       {
         name: resolvedName,
-        title: 'Original Persona',
-        description: trimmedBrief
-          ? `{{char}} — ${trimmedBrief}`
-          : '{{char}} is an original character forged in Hivemind Studio.',
+        title: resolvedTitle,
+        description: descParts.length
+          ? descParts.join('\n\n')
+          : `{{char}} is a figure of ${selectedWorld ? selectedWorld.name : 'an uncharted realm'}.`,
         personality: '',
-        scenario: '',
+        scenario: selectedWorld ? `{{user}} encounters {{char}} in ${selectedWorld.name}.` : '',
         first_mes: '',
         mes_example: '',
-        tags: ['Original'],
-        visual_prompt_tags: trimmedBrief
-          ? `portrait of ${resolvedName}, ${trimmedBrief}, detailed concept art, 8k`
-          : `portrait of ${resolvedName}, detailed character concept art, 8k`,
+        tags: selectedWorld ? [selectedWorld.name.split(' ')[0], 'Original'] : ['Original'],
+        visual_prompt_tags: `${visualParts.join(', ')}, detailed concept art, 8k`,
         world_id: newWorldId || null,
       },
       false
@@ -91,13 +119,16 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
 
   const handleGenerateAndCreate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!newBrief.trim() || generatingProfile) return;
+    if (!hasAnyCreateInput || generatingProfile) return;
     setGeneratingProfile(true);
     setCreateError(null);
     try {
       const profile = await api.generateCharacterProfile({
         brief: newBrief.trim(),
         name: newName.trim(),
+        title: newTitle.trim(),
+        race_origins: newRaceOrigins.trim(),
+        appearance: newAppearance.trim(),
         world_id: newWorldId || null,
       });
       const newCard = await api.createCharacter(
@@ -126,6 +157,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
       const profile = await api.generateCharacterProfile({
         brief: briefSource,
         name: draft.name,
+        title: draft.title,
         world_id: draft.world_id || null,
       });
       setDraft({
@@ -356,32 +388,83 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Bound World Lorebook
+                    Title / Role <span className="text-slate-500 font-normal">(optional)</span>
                   </label>
-                  <select
-                    value={newWorldId}
-                    onChange={(e) => setNewWorldId(e.target.value)}
-                    className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-sm text-white"
-                  >
-                    <option value="">— No Bound World —</option>
-                    {worlds.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="e.g. Archivist of the Sunken Library"
+                    className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Race / Species &amp; Origins <span className="text-slate-500 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newRaceOrigins}
+                    onChange={(e) => setNewRaceOrigins(e.target.value)}
+                    placeholder="e.g. Half-elf raised in the northern frost marches"
+                    className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Appearance <span className="text-slate-500 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newAppearance}
+                    onChange={(e) => setNewAppearance(e.target.value)}
+                    placeholder="e.g. Tall, silver-streaked hair, weathered coat, amber eyes"
+                    className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-sm text-white placeholder:text-slate-500"
+                  />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Brief Character Concept / Description
+                  Bound World Lorebook
+                </label>
+                <select
+                  value={newWorldId}
+                  onChange={(e) => setNewWorldId(e.target.value)}
+                  className="w-full bg-[#171c2b] border border-white/15 rounded-xl px-3 py-2 text-sm text-white"
+                >
+                  <option value="">— No Bound World —</option>
+                  {worlds.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+                {(() => {
+                  const selectedWorld = worlds.find((w) => w.id === newWorldId);
+                  if (!selectedWorld) return null;
+                  return (
+                    <p className="mt-1.5 text-[11px] text-emerald-300/80 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-1.5">
+                      <span className="font-semibold">{selectedWorld.name}</span>
+                      {selectedWorld.description ? ` — ${selectedWorld.description}` : ''}
+                      {selectedWorld.entries?.length ? ` (${selectedWorld.entries.length} lore entries)` : ''}
+                    </p>
+                  );
+                })()}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  What should this character be like? <span className="text-slate-500 font-normal">(free-text concept)</span>
                 </label>
                 <textarea
                   rows={4}
                   value={newBrief}
                   onChange={(e) => setNewBrief(e.target.value)}
-                  placeholder="Describe your character in 1–3 sentences (e.g. A retired sky-pirate navigator who now runs a floating tea shop and secretly guards an ancient star map)..."
+                  placeholder="Describe their personality, quirks, secrets, or how they fit into the world (e.g. Dry-humored, fiercely loyal to old friends, secretly trading forbidden star charts)..."
                   className="w-full bg-[#171c2b] border border-white/15 rounded-xl p-3 text-sm text-slate-100 placeholder:text-slate-500 leading-relaxed"
                 />
               </div>
@@ -398,7 +481,7 @@ export const CharacterForge: React.FC<CharacterForgeProps> = ({
 
                 <button
                   type="submit"
-                  disabled={!newBrief.trim() || generatingProfile}
+                  disabled={!hasAnyCreateInput || generatingProfile}
                   className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-violet-500 hover:from-amber-400 hover:to-violet-400 text-slate-950 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
                 >
                   <Wand2 className="w-4 h-4" />

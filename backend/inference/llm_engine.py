@@ -626,34 +626,62 @@ async def generate_node_text(
 
 async def generate_character_profile(
     config: InferenceConfig,
-    brief: str,
+    brief: str = "",
     name: str = "",
+    title: str = "",
+    race_origins: str = "",
+    appearance: str = "",
     world_name: str = "",
     world_desc: str = "",
+    world_lore_snippets: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Generates a full Character Card V2 profile from a brief user concept."""
+    """Generates a full Character Card V2 profile grounded in the bound world lorebook and user details."""
     clean_brief = " ".join(brief.strip().split())
     clean_name = name.strip()
-    world_ctx = f"World: {world_name}. {world_desc}".strip() if world_name else ""
+    clean_title = title.strip()
+    clean_origins = " ".join(race_origins.strip().split())
+    clean_appearance = " ".join(appearance.strip().split())
+    lore_lines = [s.strip() for s in (world_lore_snippets or []) if s and s.strip()]
+
+    world_parts: list[str] = []
+    if world_name:
+        world_parts.append(f"World Name: {world_name}")
+    if world_desc:
+        world_parts.append(f"World Overview: {world_desc.strip()}")
+    if lore_lines:
+        world_parts.append("World Lorebook Entries:\n- " + "\n- ".join(lore_lines[:6]))
+    world_ctx = "\n".join(world_parts)
 
     sys_prompt = (
         "You are an expert interactive fiction character designer. "
-        "Given a brief character concept, return ONLY valid JSON (no markdown fences) with these keys:\n"
-        '- "name": string (use provided name if given, else invent a fitting name)\n'
-        '- "title": string (short epithet or role title)\n'
-        '- "description": string (2-3 paragraph backstory & physical presence using {{char}} and {{user}})\n'
-        '- "personality": string (comma-separated personality & speech traits)\n'
-        '- "scenario": string (vivid opening situation where {{user}} meets {{char}})\n'
-        '- "first_mes": string (engaging opening roleplay greeting with *actions* and "dialogue")\n'
+        "Create a deeply grounded Character Card V2 profile that belongs organically to the provided world lorebook, "
+        "building directly on the character's title, race/origins, appearance, and concept. "
+        "NEVER mention any app, platform, AI, or 'forged in a studio'. Write strictly in-universe.\n"
+        "Return ONLY valid JSON (no markdown fences) with these keys:\n"
+        '- "name": string (use provided name if given, else invent a fitting in-world name)\n'
+        '- "title": string (use provided title if given, else a fitting in-world epithet/role)\n'
+        '- "description": string (2-3 paragraph in-world backstory, origins, appearance, and motives using {{char}} and {{user}})\n'
+        '- "personality": string (comma-separated personality, temperament, & speech traits)\n'
+        '- "scenario": string (vivid in-world opening situation where {{user}} meets {{char}})\n'
+        '- "first_mes": string (engaging in-character opening greeting with *actions* and "dialogue")\n'
         '- "mes_example": string (short <START> dialogue sample between {{user}} and {{char}})\n'
         '- "tags": array of 3-5 short genre/trait tags\n'
-        '- "visual_prompt_tags": string (concise comma-separated SDXL/Imagen portrait tags, SFW)'
+        '- "visual_prompt_tags": string (concise comma-separated SDXL/Imagen portrait tags reflecting appearance & attire, SFW)'
     )
-    user_msg = f"Concept: {clean_brief}"
+    user_lines: list[str] = []
     if clean_name:
-        user_msg += f"\nPreferred Name: {clean_name}"
+        user_lines.append(f"Name: {clean_name}")
+    if clean_title:
+        user_lines.append(f"Title / Role: {clean_title}")
+    if clean_origins:
+        user_lines.append(f"Race / Species & Origins: {clean_origins}")
+    if clean_appearance:
+        user_lines.append(f"Appearance: {clean_appearance}")
+    if clean_brief:
+        user_lines.append(f"Character Concept & Personality Notes: {clean_brief}")
     if world_ctx:
-        user_msg += f"\nSetting Context: {world_ctx}"
+        user_lines.append(f"\nBound World Context:\n{world_ctx}")
+    user_msg = "\n".join(user_lines) or "Create an original fantasy roleplay character."
 
     messages = [
         {"role": "system", "content": sys_prompt},
@@ -679,13 +707,14 @@ async def generate_character_profile(
         try:
             parsed = json.loads(cleaned)
             if isinstance(parsed, dict) and parsed.get("description"):
-                resolved_name = clean_name or str(parsed.get("name") or "New Character").strip()
+                resolved_name = clean_name or str(parsed.get("name") or "Aeloria").strip()
+                resolved_title = clean_title or str(parsed.get("title") or "Traveler").strip()
                 tags = parsed.get("tags")
                 if not isinstance(tags, list):
                     tags = ["Original"]
                 return {
                     "name": resolved_name,
-                    "title": str(parsed.get("title") or "Wanderer").strip(),
+                    "title": resolved_title,
                     "description": str(parsed.get("description") or "").strip(),
                     "personality": str(parsed.get("personality") or "Observant, articulate").strip(),
                     "scenario": str(parsed.get("scenario") or "").strip(),
@@ -697,28 +726,47 @@ async def generate_character_profile(
         except Exception as exc:
             logger.warning("⚠️ CHAR_GEN | Failed to parse LLM JSON, using fallback: %s", exc)
 
-    resolved_name = clean_name or "New Sovereign"
+    resolved_name = clean_name or "Kaelis"
+    resolved_title = clean_title or (f"Wanderer of {world_name}" if world_name else "Wanderer of the Borderlands")
+    detail_bits: list[str] = []
+    if clean_origins:
+        detail_bits.append(f"Born of {clean_origins}")
+    if clean_appearance:
+        detail_bits.append(f"distinctive for {clean_appearance}")
+    if clean_brief:
+        detail_bits.append(clean_brief)
+    intro_line = ", ".join(detail_bits) if detail_bits else f"known simply as {resolved_title}"
+
+    world_backstory = ""
+    if world_name:
+        world_backstory = (
+            f"\n\nRooted in {world_name}"
+            + (f" — {world_desc.strip()}" if world_desc.strip() else "")
+            + ", {{char}} has learned to navigate its shifting alliances and quiet dangers firsthand."
+        )
+
+    visual_bits = [b for b in [f"portrait of {resolved_name}", resolved_title, clean_origins, clean_appearance, clean_brief] if b]
     return {
         "name": resolved_name,
-        "title": "Forged Persona",
-        "description": (
-            f"{{{{char}}}} is shaped by a distinct premise: {clean_brief}.\n\n"
-            f"Carrying the weight of past choices and quiet ambition, {{{{char}}}} observes every newcomer "
-            f"with measured curiosity before revealing their true motives."
+        "title": resolved_title,
+        "description": f"{{{{char}}}}, {resolved_title}, is {intro_line}.{world_backstory}",
+        "personality": "Observant, resourceful, articulate, guarded yet curious",
+        "scenario": (
+            f"{{{{user}}}} crosses paths with {{{{char}}}} in {world_name}."
+            if world_name
+            else f"{{{{user}}}} crosses paths with {{{{char}}}} at a quiet turning point."
         ),
-        "personality": "Observant, resourceful, articulate, guarded yet intriguing",
-        "scenario": f"{{{{user}}}} crosses paths with {{{{char}}}} in a moment shaped by: {clean_brief}.",
         "first_mes": (
             f"*{{{{char}}}} pauses, taking your measure with a calm, steady gaze.*\n\n"
-            f"\"You're not the first to seek me out, {{{{user}}}}—but you might be the first worth listening to.\""
+            f"\"You're not the first to seek me out, {{{{user}}}}—but you might be the first worth speaking with.\""
         ),
         "mes_example": (
             "<START>\n"
-            "{{user}}: Tell me what you're really after.\n"
-            "{{char}}: \"Truth has a price. Decide what you're willing to trade, and we'll begin.\""
+            "{{user}}: What brings someone like you here?\n"
+            "{{char}}: \"Old debts, unfinished business, and a sharper eye than most.\""
         ),
-        "tags": ["Original", "Roleplay"],
-        "visual_prompt_tags": f"portrait of {resolved_name}, {clean_brief}, dramatic rim lighting, detailed concept art, 8k",
+        "tags": [t for t in [world_name.split()[0] if world_name else "", "Original", "Roleplay"] if t],
+        "visual_prompt_tags": ", ".join(visual_bits) + ", dramatic rim lighting, detailed concept art, 8k",
     }
 
 

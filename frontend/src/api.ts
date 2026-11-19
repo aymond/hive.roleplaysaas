@@ -45,8 +45,11 @@ export const api = {
       body: JSON.stringify(card),
     }),
   generateCharacterProfile: (payload: {
-    brief: string;
+    brief?: string;
     name?: string;
+    title?: string;
+    race_origins?: string;
+    appearance?: string;
     world_id?: string | null;
   }) =>
     request<{

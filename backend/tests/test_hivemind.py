@@ -1351,17 +1351,25 @@ def test_character_forge_draft_and_profile_generation() -> None:
 
     client = TestClient(main_mod.app)
 
-    # 1. Generating a profile from a brief description returns structured Character V2 fields
+    # 1. Generating a profile from free-text details + world lorebook returns grounded Character V2 fields
+    worlds = client.get("/api/worlds").json()
+    world_id = worlds[0]["id"] if worlds else None
     gen_resp = client.post(
         "/api/characters/generate-profile",
         json={
-            "brief": "A retired sky-pirate navigator who runs a floating tea shop",
+            "brief": "Dry-humored, fiercely loyal to old friends, secretly trading star charts",
             "name": "Captain Orin",
+            "title": "Sky-Pirate Tea Master",
+            "race_origins": "Half-elf from the northern frost marches",
+            "appearance": "Silver-streaked hair, weathered coat, amber eyes",
+            "world_id": world_id,
         },
     )
     assert gen_resp.status_code == 200
     profile = gen_resp.json()
     assert profile["name"] == "Captain Orin"
+    assert profile["title"] == "Sky-Pirate Tea Master"
+    assert "hivemind studio" not in profile["description"].lower()
     assert profile["description"]
     assert profile["personality"]
     assert profile["first_mes"]
