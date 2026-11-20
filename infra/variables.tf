@@ -91,3 +91,33 @@ variable "rate_limit_per_minute" {
   type        = number
   default     = 30
 }
+
+variable "imprint_name" {
+  description = "Legal controller name for Impressum (§ 5 DDG)"
+  type        = string
+  default     = ""
+}
+
+variable "imprint_address" {
+  description = "Summonable physical street address for Impressum (§ 5 DDG)"
+  type        = string
+  default     = ""
+}
+
+variable "imprint_email" {
+  description = "Contact email address for Impressum (§ 5 DDG)"
+  type        = string
+  default     = ""
+}
+
+variable "imprint_phone" {
+  description = "Optional contact phone number for Impressum (§ 5 DDG)"
+  type        = string
+  default     = ""
+}
+
+variable "privacy_email" {
+  description = "Privacy contact email for Datenschutzerklärung (Art. 13 DSGVO)"
+  type        = string
+  default     = ""
+}

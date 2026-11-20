@@ -1634,3 +1634,39 @@ def test_create_chat_seeds_scene_state_from_character_and_world() -> None:
     client.delete(f"/api/chats/{chat_resp.json()['id']}")
     client.delete(f"/api/characters/{char_id}")
     client.delete(f"/api/worlds/{world_id}")
+
+
+def test_gdpr_legal_config_and_account_erasure(monkeypatch) -> None:
+    import backend.main as main_mod
+
+    monkeypatch.setenv("IMPRINT_NAME", "Test Operator GmbH")
+    monkeypatch.setenv("IMPRINT_ADDRESS", "Teststr. 1, 10115 Berlin")
+    monkeypatch.setenv("IMPRINT_EMAIL", "legal@example.de")
+    monkeypatch.setenv("PRIVACY_EMAIL", "privacy@example.de")
+
+    client = TestClient(main_mod.app)
+    cfg_resp = client.get("/api/auth/config")
+    assert cfg_resp.status_code == 200
+    legal = cfg_resp.json().get("legal")
+    assert isinstance(legal, dict)
+    assert legal["imprint_name"] == "Test Operator GmbH"
+    assert legal["imprint_address"] == "Teststr. 1, 10115 Berlin"
+    assert legal["imprint_email"] == "legal@example.de"
+    assert legal["privacy_email"] == "privacy@example.de"
+    assert "region" in legal
+
+    # Create a character under the current local user, then erase the account
+    char_resp = client.post(
+        "/api/characters?auto_generate_avatar=false",
+        json={"name": "GDPR Erase Char"},
+    )
+    assert char_resp.status_code == 200
+
+    del_resp = client.delete("/api/account")
+    assert del_resp.status_code == 200
+    body = del_resp.json()
+    assert body["status"] == "deleted"
+    assert body["uid"] == "local-owner"
+    assert "deleted_media_objects" in body
+    set_cookie = del_resp.headers.get("set-cookie", "")
+    assert "hm_token=" in set_cookie

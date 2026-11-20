@@ -312,12 +312,22 @@ export interface GalleryAsset {
   created_at: string;
 }
 
+export interface LegalConfig {
+  imprint_name: string;
+  imprint_address: string;
+  imprint_email: string;
+  imprint_phone?: string;
+  privacy_email: string;
+  region?: string;
+}
+
 export interface AuthConfig {
   saas_auth_enabled: boolean;
   firebase_api_key: string;
   firebase_auth_domain: string;
   firebase_project_id: string;
   enabled_providers?: string[];
+  legal?: LegalConfig;
 }
 
 export interface UserProfile {

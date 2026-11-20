@@ -12,6 +12,8 @@ interface LoginScreenProps {
   authConfig: AuthConfig;
   initialError?: string | null;
   onAuthenticated: () => void;
+  onOpenLegal?: (tab: 'privacy' | 'imprint') => void;
+  onOpenConsentSettings?: () => void;
 }
 
 const PROVIDER_META: Record<
@@ -28,6 +30,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   authConfig,
   initialError,
   onAuthenticated,
+  onOpenLegal,
+  onOpenConsentSettings,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -229,6 +233,42 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
+        )}
+
+        {(onOpenLegal || onOpenConsentSettings) && (
+          <div className="mt-6 pt-4 border-t border-white/10 flex flex-wrap items-center justify-center gap-3 text-[11px] text-slate-400">
+            {onOpenLegal && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('privacy')}
+                  className="hover:text-amber-300 underline decoration-slate-600 underline-offset-2 cursor-pointer"
+                >
+                  Datenschutzerklärung
+                </button>
+                <span aria-hidden="true">·</span>
+                <button
+                  type="button"
+                  onClick={() => onOpenLegal('imprint')}
+                  className="hover:text-amber-300 underline decoration-slate-600 underline-offset-2 cursor-pointer"
+                >
+                  Impressum
+                </button>
+              </>
+            )}
+            {onOpenConsentSettings && (
+              <>
+                <span aria-hidden="true">·</span>
+                <button
+                  type="button"
+                  onClick={onOpenConsentSettings}
+                  className="hover:text-amber-300 underline decoration-slate-600 underline-offset-2 cursor-pointer"
+                >
+                  Cookie-Einstellungen
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>

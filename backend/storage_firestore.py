@@ -289,6 +289,9 @@ class FirestoreStorage(StudioStorage):
         user_ref = self._db.collection("users").document(uid)
         if not user_ref.get().exists:
             return False
+        for sub in ("characters", "worlds", "chats", "workflows", "gallery", "ledger"):
+            for doc in user_ref.collection(sub).stream():
+                doc.reference.delete()
         user_ref.delete()
         self._tenant_cache.pop(uid, None)
         return True

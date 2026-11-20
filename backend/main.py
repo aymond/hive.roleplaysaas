@@ -60,7 +60,7 @@ from .auth import (
     set_user_directory,
 )
 from .billing import router as billing_router
-from .media_gcs import download_user_media, is_gcs_enabled
+from .media_gcs import delete_user_media_prefix, download_user_media, is_gcs_enabled
 from .moderation import enforce_moderation_or_422, scan_for_trigger_words
 from .rate_limit import enforce_rate_limit
 from .storage import StudioStorage
@@ -291,15 +291,24 @@ class BackstoryImageRequest(BaseModel):
 
 @app.get("/api/auth/config")
 async def get_auth_config() -> dict[str, Any]:
-    """Public client auth configuration for the login challenge screen."""
+    """Public client auth & German legal (Impressum/Datenschutz) config."""
     raw_providers = os.getenv("AUTH_PROVIDERS", "google").strip()
     enabled_providers = [p.strip().lower() for p in raw_providers.split(",") if p.strip()]
+    imprint_email = os.getenv("IMPRINT_EMAIL", "").strip()
     return {
         "saas_auth_enabled": SAAS_AUTH_ENABLED,
         "firebase_api_key": os.getenv("FIREBASE_WEB_API_KEY", "").strip(),
         "firebase_auth_domain": os.getenv("FIREBASE_AUTH_DOMAIN", "").strip(),
         "firebase_project_id": os.getenv("GCP_PROJECT_ID", "").strip(),
         "enabled_providers": enabled_providers,
+        "legal": {
+            "imprint_name": os.getenv("IMPRINT_NAME", "").strip(),
+            "imprint_address": os.getenv("IMPRINT_ADDRESS", "").strip(),
+            "imprint_email": imprint_email,
+            "imprint_phone": os.getenv("IMPRINT_PHONE", "").strip(),
+            "privacy_email": os.getenv("PRIVACY_EMAIL", "").strip() or imprint_email,
+            "region": os.getenv("GCP_REGION", "europe-west4").strip(),
+        },
     }
 
 
@@ -335,6 +344,29 @@ async def get_auth_me(
 async def auth_logout(response: Response) -> dict[str, str]:
     response.delete_cookie(key="hm_token", path="/")
     return {"status": "signed_out"}
+
+
+@app.delete("/api/account")
+async def delete_my_account(
+    response: Response,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Self-service account & data erasure (Art. 17 DSGVO)."""
+    deleted_blobs = delete_user_media_prefix(user.uid) if is_gcs_enabled() else 0
+    storage.delete_user(user.uid)
+
+    if SAAS_AUTH_ENABLED:
+        try:
+            from .auth import FIREBASE_AVAILABLE, _ensure_firebase_app, firebase_auth
+
+            if FIREBASE_AVAILABLE and firebase_auth is not None:
+                _ensure_firebase_app()
+                firebase_auth.delete_user(user.uid)
+        except Exception as exc:
+            logger.warning("⚠️ ACCOUNT  | Failed to delete Firebase Auth user %s: %s", user.uid, exc)
+
+    response.delete_cookie(key="hm_token", path="/")
+    return {"status": "deleted", "uid": user.uid, "deleted_media_objects": deleted_blobs}
 
 
 @app.get("/api/system/status")
@@ -1327,11 +1359,11 @@ async def send_chat_message(
         raise HTTPException(status_code=404, detail="Character not found")
 
     logger.info(
-        "▶ ACTION   | send_chat_message(chat=%r, char=%r, illustrate=%s, text=%r)",
+        "▶ ACTION   | send_chat_message(chat=%r, char=%r, illustrate=%s, text=%s)",
         session.title,
         card.name,
         req.illustrate_scene,
-        req.content[:90],
+        "[redacted]" if SAAS_AUTH_ENABLED else repr(req.content[:90]),
     )
 
     world = ws.worlds.get(session.world_id) if session.world_id else None
@@ -1986,7 +2018,12 @@ async def generate_direct_gallery_image(
     if storage.config.sfw_mode:
         enforce_moderation_or_422([req.prompt], storage.moderation_policy, context_label="gallery prompt")
     ws = storage.for_user(user.uid)
-    logger.info("▶ ACTION   | generate_direct_gallery_image(prompt=%r, %dx%d)", req.prompt[:90], req.width, req.height)
+    logger.info(
+        "▶ ACTION   | generate_direct_gallery_image(prompt=%s, %dx%d)",
+        "[redacted]" if SAAS_AUTH_ENABLED else repr(req.prompt[:90]),
+        req.width,
+        req.height,
+    )
     img_meta = await generate_image_asset(
         config=storage.config,
         output_dir=storage.generated_dir,

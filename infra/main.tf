@@ -243,6 +243,26 @@ resource "google_cloud_run_v2_service" "api" {
         value = tostring(var.rate_limit_per_minute)
       }
       env {
+        name  = "IMPRINT_NAME"
+        value = var.imprint_name
+      }
+      env {
+        name  = "IMPRINT_ADDRESS"
+        value = var.imprint_address
+      }
+      env {
+        name  = "IMPRINT_EMAIL"
+        value = var.imprint_email
+      }
+      env {
+        name  = "IMPRINT_PHONE"
+        value = var.imprint_phone
+      }
+      env {
+        name  = "PRIVACY_EMAIL"
+        value = var.privacy_email
+      }
+      env {
         name  = "GCP_PROJECT_ID"
         value = var.project_id
       }

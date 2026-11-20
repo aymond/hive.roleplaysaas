@@ -69,3 +69,23 @@ def download_user_media(uid: str, filename: str) -> tuple[bytes, str] | None:
     except Exception as exc:
         logger.warning("⚠️ GCS      | Failed to download %s for uid=%s: %s", safe_name, uid, exc)
         return None
+
+
+def delete_user_media_prefix(uid: str) -> int:
+    """Deletes all GCS media objects under `users/{uid}/` (Art. 17 DSGVO erasure)."""
+    bucket_name = os.getenv("GCS_MEDIA_BUCKET", "").strip()
+    if not bucket_name or not uid:
+        return 0
+    try:
+        from google.cloud import storage as gcs  # type: ignore[import-not-found]
+
+        client = gcs.Client()
+        bucket = client.bucket(bucket_name)
+        deleted = 0
+        for blob in bucket.list_blobs(prefix=f"users/{uid}/"):
+            blob.delete()
+            deleted += 1
+        return deleted
+    except Exception as exc:
+        logger.warning("⚠️ GCS      | Failed to purge media for uid=%s: %s", uid, exc)
+        return 0

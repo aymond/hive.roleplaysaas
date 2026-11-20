@@ -12,6 +12,9 @@ import {
   Shield,
   User as UserIcon,
   Menu,
+  Trash2,
+  FileText,
+  Cookie,
 } from 'lucide-react';
 import { api } from './api';
 import type {
@@ -36,6 +39,8 @@ import { EngineSettingsModal } from './components/EngineSettingsModal';
 import { AdminModerationModal } from './components/AdminModerationModal';
 import { LoginScreen } from './components/LoginScreen';
 import { AdminPage } from './components/AdminPage';
+import { ConsentBanner, readStoredConsent } from './components/ConsentBanner';
+import { LegalModal } from './components/LegalModal';
 
 type StudioTab = 'chat' | 'characters' | 'worlds' | 'gallery' | 'admin';
 
@@ -55,6 +60,9 @@ export const App: React.FC = () => {
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [consentBannerOpen, setConsentBannerOpen] = useState<boolean>(() => !readStoredConsent());
+  const [legalModalTab, setLegalModalTab] = useState<'privacy' | 'imprint' | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const handleSignOut = useCallback(() => {
     clearAllAuthSessions();
@@ -189,11 +197,27 @@ export const App: React.FC = () => {
 
   if (authConfig && !userProfile && !loading) {
     return (
-      <LoginScreen
-        authConfig={authConfig}
-        initialError={authError}
-        onAuthenticated={bootstrapSession}
-      />
+      <>
+        <LoginScreen
+          authConfig={authConfig}
+          initialError={authError}
+          onAuthenticated={bootstrapSession}
+          onOpenLegal={(tab) => setLegalModalTab(tab)}
+          onOpenConsentSettings={() => setConsentBannerOpen(true)}
+        />
+        <ConsentBanner
+          open={consentBannerOpen}
+          onClose={() => setConsentBannerOpen(false)}
+          onOpenLegal={(tab) => setLegalModalTab(tab)}
+        />
+        <LegalModal
+          open={legalModalTab !== null}
+          initialTab={legalModalTab || 'privacy'}
+          legal={authConfig.legal}
+          onClose={() => setLegalModalTab(null)}
+          onOpenConsentSettings={() => setConsentBannerOpen(true)}
+        />
+      </>
     );
   }
 
@@ -395,6 +419,77 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       role="menuitem"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        setConsentBannerOpen(true);
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-slate-200 flex items-center gap-2.5 hover:bg-white/5 cursor-pointer"
+                    >
+                      <Cookie className="w-4 h-4 text-cyan-400" />
+                      Privacy &amp; Cookies
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        setLegalModalTab('privacy');
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-slate-200 flex items-center gap-2.5 hover:bg-white/5 cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4 text-slate-400" />
+                      Datenschutzerklärung
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        setLegalModalTab('imprint');
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs text-slate-200 flex items-center gap-2.5 hover:bg-white/5 cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4 text-slate-400" />
+                      Impressum
+                    </button>
+
+                    <div className="my-1 border-t border-white/10" />
+
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={deletingAccount}
+                      onClick={async () => {
+                        if (
+                          !window.confirm(
+                            'Permanently delete your account, characters, worlds, chats, and generated images? This cannot be undone (Art. 17 GDPR).'
+                          )
+                        ) {
+                          return;
+                        }
+                        setDeletingAccount(true);
+                        try {
+                          await api.deleteMyAccount();
+                          setUserMenuOpen(false);
+                          handleSignOut();
+                        } catch (err) {
+                          console.error('Failed to delete account', err);
+                          alert('Account deletion failed. Please try again or contact privacy support.');
+                        } finally {
+                          setDeletingAccount(false);
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs font-semibold text-rose-300 flex items-center gap-2.5 hover:bg-rose-500/15 cursor-pointer disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4 text-rose-400" />
+                      {deletingAccount ? 'Deleting Account...' : 'Delete Account & Data'}
+                    </button>
+
+                    <button
+                      type="button"
+                      role="menuitem"
                       onClick={handleSignOut}
                       className="w-full px-3.5 py-2.5 text-left text-xs font-semibold text-rose-200 flex items-center gap-2.5 hover:bg-rose-500/15 cursor-pointer"
                     >
@@ -521,6 +616,19 @@ export const App: React.FC = () => {
           />
         </>
       )}
+
+      <ConsentBanner
+        open={consentBannerOpen}
+        onClose={() => setConsentBannerOpen(false)}
+        onOpenLegal={(tab) => setLegalModalTab(tab)}
+      />
+      <LegalModal
+        open={legalModalTab !== null}
+        initialTab={legalModalTab || 'privacy'}
+        legal={authConfig?.legal}
+        onClose={() => setLegalModalTab(null)}
+        onOpenConsentSettings={() => setConsentBannerOpen(true)}
+      />
     </div>
   );
 };

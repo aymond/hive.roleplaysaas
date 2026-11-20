@@ -49,6 +49,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   getAuthConfig: () => request<AuthConfig>('/api/auth/config'),
   getCurrentUser: () => request<UserProfile>('/api/auth/me'),
+  deleteMyAccount: () =>
+    request<{ status: string; uid: string; deleted_media_objects: number }>('/api/account', {
+      method: 'DELETE',
+    }),
   listAdminUsers: () => request<AdminUserRecord[]>('/api/admin/users'),
   updateAdminUser: (
     uid: string,
