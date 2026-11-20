@@ -5,7 +5,6 @@ import {
   BookOpen,
   Image as ImageIcon,
   Settings,
-  Cpu,
   Sparkles,
   ShieldAlert,
   LogOut,
@@ -270,27 +269,8 @@ export const App: React.FC = () => {
           </nav>
         </div>
 
-        {/* Right Profile Pill, Admin Hamburger Menu & Telemetry */}
+        {/* Right Profile Pill & Admin Hamburger Menu */}
         <div className="flex items-center gap-2 shrink-0">
-          {isAdmin && status && (
-            <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300 whitespace-nowrap">
-              <Cpu className="w-3.5 h-3.5 text-emerald-400" />
-              <span>
-                {status.hardware.cloud_run
-                  ? 'GCP Cloud Run'
-                  : status.hardware.is_apple_silicon
-                  ? `Apple Silicon ${status.hardware.architecture}`
-                  : `${status.hardware.system} ${status.hardware.architecture}`}{' '}
-                •{' '}
-                {status.hardware.cuda_available
-                  ? 'CUDA GPU Ready'
-                  : status.hardware.mps_available
-                  ? 'Metal MPS Ready'
-                  : 'Cloud / CPU'}
-              </span>
-            </div>
-          )}
-
           {isAdmin && (
             <div className="relative">
               <button
